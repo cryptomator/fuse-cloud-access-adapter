@@ -15,6 +15,14 @@
 		</developer>
 	</developers>
 
+	<licenses>
+		<license>
+			<name>GNU Affero General Public License (AGPL) version 3.0</name>
+			<url>https://www.gnu.org/licenses/agpl.txt</url>
+			<distribution>repo</distribution>
+		</license>
+	</licenses>
+
 	<repositories>
 		<repository>
 			<id>jcenter</id>
@@ -26,6 +34,8 @@
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
 		<!-- compile time dependencies -->
+		<jnrfuse.version>0.5.4</jnrfuse.version>
+		<cloudaccess.version>0.1.0</cloudaccess.version>
 		<slf4j.version>1.7.28</slf4j.version>
 
 		<!-- test dependencies -->
@@ -35,6 +45,16 @@
 	</properties>
 
 	<dependencies>
+		<dependency>
+			<groupId>org.cryptomator</groupId>
+			<artifactId>cloud-access</artifactId>
+			<version>${cloudaccess.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>com.github.serceman</groupId>
+			<artifactId>jnr-fuse</artifactId>
+			<version>${jnrfuse.version}</version>
+		</dependency>
 		<dependency>
 			<groupId>org.slf4j</groupId>
 			<artifactId>slf4j-api</artifactId>
