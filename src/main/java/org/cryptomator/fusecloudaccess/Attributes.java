@@ -1,7 +1,6 @@
 package org.cryptomator.fusecloudaccess;
 
 import java.time.Instant;
-import java.util.Date;
 
 import jnr.posix.util.Platform;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
@@ -28,7 +27,7 @@ class Attributes {
 		stat.st_uid.set(DUMMY_UID);
 		stat.st_gid.set(DUMMY_GID);
 		stat.st_size.set(metadata.getSize().orElse(0l));
-		var mTime = metadata.getLastModifiedDate().map(Date::toInstant).orElse(Instant.EPOCH);
+		var mTime = metadata.getLastModifiedDate().orElse(Instant.EPOCH);
 		stat.st_mtim.tv_sec.set(mTime.getEpochSecond());
 		stat.st_mtim.tv_nsec.set(mTime.getNano());
 		if (Platform.IS_MAC || Platform.IS_WINDOWS) {
