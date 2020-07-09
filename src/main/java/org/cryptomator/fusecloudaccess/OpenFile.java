@@ -1,58 +1,57 @@
 package org.cryptomator.fusecloudaccess;
 
-import java.io.IOException;
-import java.nio.file.Path;
-import java.util.Set;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-
 import com.google.common.base.MoreObjects;
 import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
 
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+
 class OpenFile {
 
 	private final CloudProvider provider;
 	private final Path path;
 	private final Set<OpenFlags> flags;
-	private final int timeoutMillis;
 
-	public OpenFile(CloudProvider provider, Path path, Set<OpenFlags> flags, int timeoutMillis) {
+	public OpenFile(CloudProvider provider, Path path, Set<OpenFlags> flags) {
 		this.provider = provider;
 		this.path = path;
 		this.flags = flags;
-		this.timeoutMillis = timeoutMillis;
 	}
 
 	/**
 	 * Reads up to {@code num} bytes beginning at {@code offset} into {@code buf}
 	 *
-	 * @param buf Buffer
+	 * @param buf    Buffer
 	 * @param offset Position of first byte to read
-	 * @param size Number of bytes to read
-	 * @return Actual number of bytes read (can be less than {@code size} if reached EOF).
-	 * @throws IOException If an exception occurs during read.
-	 * @throws InterruptedException If the operation is interrupted while waiting for an input stream
-	 * @throws ExecutionException If opening an input stream to read from failed (see cause for details)
-	 * @throws TimeoutException If opening an input stream took too long
+	 * @param size   Number of bytes to read
+	 * @return A CompletionStage either containing the actual number of bytes read (can be less than {@code size} if reached EOF)
+	 * or failing with an {@link IOException}
 	 */
-	public int read(Pointer buf, long offset, long size) throws IOException, InterruptedException, ExecutionException, TimeoutException {
-		try (var in = provider.read(path, offset, size, ProgressListener.NO_PROGRESS_AWARE).toCompletableFuture().get(100, TimeUnit.MILLISECONDS)) {
-			byte[] tmp = new byte[1024];
-			long pos = offset;
-			while (pos < offset + size) {
-				int read = in.read(tmp);
-				if (read == -1) {
-					break;
+	public CompletionStage<Integer> read(Pointer buf, long offset, long size) {
+		return provider.read(path, offset, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(inputStream -> {
+			try (var in = inputStream) {
+				byte[] tmp = new byte[1024];
+				long pos = offset;
+				while (pos < offset + size) {
+					int read = in.read(tmp);
+					if (read == -1) {
+						break;
+					}
+					buf.put(pos - offset, tmp, 0, read);
+					pos += read;
 				}
-				buf.put(pos - offset, tmp, 0, read);
-				pos += read;
+				int totalRead = (int) (pos - offset);
+				return CompletableFuture.completedFuture(totalRead);
+			} catch (IOException e) {
+				return CompletableFuture.failedFuture(e);
 			}
-			return (int) (pos - offset);
-		}
+		});
 	}
 
 	@Override

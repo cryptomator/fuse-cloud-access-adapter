@@ -1,12 +1,5 @@
 package org.cryptomator.fusecloudaccess;
 
-import java.io.IOException;
-import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-
 import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudProvider;
@@ -19,6 +12,13 @@ import ru.serce.jnrfuse.FuseStubFS;
 import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
 public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	private static final Logger LOG = LoggerFactory.getLogger(CloudAccessFS.class);
@@ -30,21 +30,18 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	public CloudAccessFS(CloudProvider provider, int timeoutMillis) {
 		this.provider = provider;
 		this.timeoutMillis = timeoutMillis;
-		this.openFileFactory = new OpenFileFactory(provider, timeoutMillis);
+		this.openFileFactory = new OpenFileFactory(provider);
 	}
 
-	@Override
-	public int getattr(String path, FileStat stat) {
+	private int returnOrTimeout(CompletionStage<Integer> returnCode) {
 		try {
-			var metadata = provider.itemMetadata(Path.of(path)).toCompletableFuture().get(timeoutMillis, TimeUnit.MILLISECONDS);
-			Attributes.copy(metadata, stat);
-			return 0;
+			return returnCode.toCompletableFuture().get(timeoutMillis, TimeUnit.MILLISECONDS);
 		} catch (InterruptedException e) {
-			LOG.warn("getattr() interrupted");
+			LOG.warn("async call interrupted");
 			Thread.currentThread().interrupt();
 			return -ErrorCodes.EINTR();
 		} catch (ExecutionException e) {
-			LOG.error("getattr()", e.getCause());
+			LOG.error("encountered unhandled exception", e.getCause());
 			return -ErrorCodes.EIO();
 		} catch (TimeoutException e) {
 			return -ErrorCodes.ETIMEDOUT();
@@ -52,11 +49,24 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	@Override
+	public int getattr(String path, FileStat stat) {
+		var returnCode = provider.itemMetadata(Path.of(path)).thenApply(metadata -> {
+			Attributes.copy(metadata, stat);
+			return 0;
+		}).exceptionally(e -> {
+			if (e.getCause() instanceof NoSuchFileException) {
+				return -ErrorCodes.ENOENT();
+			} else {
+				LOG.error("getattr() failed", e); // TODO distinguish causes
+				return -ErrorCodes.EIO();
+			}
+		});
+		return returnOrTimeout(returnCode);
+	}
+
+	@Override
 	public int readdir(String path, Pointer buf, FuseFillDir filler, long offset, FuseFileInfo fi) {
-		try {
-			// TODO paginated listing (keep track of `open`ed directories and store page tockens?):
-			var itemList = provider.listExhaustively(Path.of(path)).toCompletableFuture().get(timeoutMillis, TimeUnit.MILLISECONDS);
-			// TODO check filler return code:
+		var returnCode = provider.listExhaustively(Path.of(path)).thenApply(itemList -> {
 			filler.apply(buf, ".", null, 0);
 			filler.apply(buf, "..", null, 0);
 			for (var item : itemList.getItems()) {
@@ -65,39 +75,28 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 				}
 			}
 			return 0;
-		} catch (InterruptedException e) {
-			LOG.warn("readdir() interrupted");
-			Thread.currentThread().interrupt();
-			return -ErrorCodes.EINTR();
-		} catch (ExecutionException e) {
-			LOG.error("readdir()", e.getCause());
+		}).exceptionally(e -> {
+			LOG.error("readdir() failed", e); // TODO distinguish causes
 			return -ErrorCodes.EIO();
-		} catch (TimeoutException e) {
-			return -ErrorCodes.ETIMEDOUT();
-		}
+		});
+		return returnOrTimeout(returnCode);
 	}
 
 	@Override
 	public int open(String path, FuseFileInfo fi) {
-		try {
-			provider.itemMetadata(Path.of(path)).toCompletableFuture().get(timeoutMillis, TimeUnit.MILLISECONDS);
+		var returnCode = provider.itemMetadata(Path.of(path)).thenApply(metadata -> {
 			long fileHandle = openFileFactory.open(Path.of(path), BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()));
 			fi.fh.set(fileHandle);
 			return 0;
-		} catch (InterruptedException e) {
-			LOG.warn("getattr() interrupted");
-			Thread.currentThread().interrupt();
-			return -ErrorCodes.EINTR();
-		} catch (ExecutionException e) {
+		}).exceptionally(e -> {
 			if (e.getCause() instanceof NoSuchFileException) {
 				return -ErrorCodes.ENOENT();
 			} else {
-				LOG.error("getattr()", e.getCause());
+				LOG.error("open() failed", e);
 				return -ErrorCodes.EIO();
 			}
-		} catch (TimeoutException e) {
-			return -ErrorCodes.ETIMEDOUT();
-		}
+		});
+		return returnOrTimeout(returnCode);
 	}
 
 	@Override
@@ -133,25 +132,19 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int read(String path, Pointer buf, long size, long offset, FuseFileInfo fi) {
-		try {
-			var openFile = openFileFactory.get(fi.fh.get());
-			return openFile.read(buf, offset, size);
-		} catch (IllegalArgumentException e) {
-			LOG.warn("read() failed, invalid file handle {}", fi.fh.get());
+		var openFile = openFileFactory.get(fi.fh.get());
+		if (openFile.isEmpty()) {
 			return -ErrorCodes.EBADF();
-		} catch (IOException e) {
-			LOG.error("read() failed", e);
-			return -ErrorCodes.EIO();
-		} catch (InterruptedException e) {
-			LOG.warn("read() interrupted");
-			Thread.currentThread().interrupt();
-			return -ErrorCodes.EINTR();
-		} catch (ExecutionException e) {
-			LOG.error("read() failed", e.getCause());
-			return -ErrorCodes.EIO();
-		} catch (TimeoutException e) {
-			return -ErrorCodes.ETIMEDOUT();
 		}
+		var returnCode = openFile.get().read(buf, offset, size).exceptionally(e -> {
+			if (e.getCause() instanceof NoSuchFileException) {
+				return -ErrorCodes.ENOENT();
+			} else {
+				LOG.error("read() failed", e);
+				return -ErrorCodes.EIO();
+			}
+		});
+		return returnOrTimeout(returnCode);
 	}
 
 //	@Override
