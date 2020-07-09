@@ -23,7 +23,7 @@ public class MirrorTest {
 
 	private static final Logger LOG = LoggerFactory.getLogger(MirrorTest.class);
 	private static final String OS_NAME = System.getProperty("os.name").toLowerCase();
-	private static final Path USER_HOME = Paths.get(System.getProperty("user.home"));
+	private static final Path USER_HOME = Path.of(System.getProperty("user.home"));
 
 	public static class MacMirror {
 
@@ -32,8 +32,8 @@ public class MirrorTest {
 
 			try (Scanner scanner = new Scanner(System.in)) {
 				System.out.println("Enter path to the directory you want to mirror:");
-				Path p = Paths.get(scanner.nextLine());
-				Path m = Paths.get("/Volumes/" + UUID.randomUUID().toString());
+				Path p = Path.of(scanner.nextLine());
+				Path m = Path.of("/Volumes/" + UUID.randomUUID().toString());
 				var cloudAccessProvider = new LocalFsCloudProvider(p);
 				var fs = new CloudAccessFS(cloudAccessProvider, 1000);
 				var flags = new String[]{
