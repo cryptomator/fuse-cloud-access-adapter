@@ -79,12 +79,15 @@ public class MirrorTest {
 						"-ordonly", // TODO remove once we support writing
 						"-odefault_permissions" // let the kernel assume permissions based on file attributes etc
 				};
+				//mount
 				LOG.info("Mounting FUSE file system at {}...", m);
 				fs.mount(m, false, true, flags);
-				Thread.sleep(10000);
+				//wait
+				LOG.info("Type anything and hit enter to stop.");
+				scanner.nextLine();
+				//unmount
+				fs.umount(); //we are not blocking, therefore need to explicitly call umount
 				LOG.info("Unmounted {}.", m);
-			} catch (InterruptedException e) {
-				e.printStackTrace();
 			}
 		}
 	}
