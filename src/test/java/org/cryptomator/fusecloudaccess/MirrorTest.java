@@ -57,5 +57,36 @@ public class MirrorTest {
 		}
 
 	}
-	
+
+	public static class WinMirror {
+
+		public static void main(String args[]) {
+			Preconditions.checkState(OS_NAME.contains("windows"), "Test designed to run on windows.");
+
+			try (Scanner scanner = new Scanner(System.in)) {
+				System.out.println("Enter path to the directory you want to mirror:");
+				Path p = Paths.get(scanner.nextLine());
+				System.out.println("Enter path to the not-existent directory you want to use as mountpoint :");
+				Path m = Paths.get(scanner.nextLine());
+				var cloudAccessProvider = new LocalFsCloudProvider(p);
+				var fs = new CloudAccessFS(cloudAccessProvider, 1000);
+				var flags = new String[]{
+						"-ouid=-1",
+						"-ogid=-1",
+						"-oauto_unmount",
+						"-oauto_cache",
+						"-ovolname=CloudAccessMirror",
+						"-ordonly", // TODO remove once we support writing
+						"-odefault_permissions" // let the kernel assume permissions based on file attributes etc
+				};
+				LOG.info("Mounting FUSE file system at {}...", m);
+				fs.mount(m, false, true, flags);
+				Thread.sleep(10000);
+				LOG.info("Unmounted {}.", m);
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+		}
+	}
+
 }
