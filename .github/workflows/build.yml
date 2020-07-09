@@ -16,6 +16,9 @@ jobs:
       - uses: actions/setup-java@v1
         with:
           java-version: 11
+          server-id: bintray-jcenter
+          server-username: BINTRAY_USERNAME
+          server-password: BINTRAY_API_KEY
       - uses: actions/cache@v1
         with:
           path: ~/.m2/repository
@@ -38,3 +41,9 @@ jobs:
         with:
           name: fuse-cloud-access-adapter-${{ env.BUILD_VERSION }}.jar
           path: target/fuse-cloud-access-adapter-*.jar
+      - name: Deploy to jcenter
+        run: mvn -B deploy
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          BINTRAY_USERNAME: cryptobot
+          BINTRAY_API_KEY: ${{ secrets.BINTRAY_API_KEY }}
