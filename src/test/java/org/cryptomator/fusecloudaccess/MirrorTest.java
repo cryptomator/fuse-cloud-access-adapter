@@ -36,7 +36,7 @@ public class MirrorTest {
 				Path m = Path.of("/Volumes/" + UUID.randomUUID().toString());
 				var cloudAccessProvider = new LocalFsCloudProvider(p);
 				var fs = new CloudAccessFS(cloudAccessProvider, 1000);
-				var flags = new String[]{
+				var flags = new String[] {
 						"-ouid=" + Files.getAttribute(USER_HOME, "unix:uid"),
 						"-ogid=" + Files.getAttribute(USER_HOME, "unix:gid"),
 						"-oatomic_o_trunc",
@@ -70,7 +70,7 @@ public class MirrorTest {
 				Path m = Paths.get(scanner.nextLine());
 				var cloudAccessProvider = new LocalFsCloudProvider(p);
 				var fs = new CloudAccessFS(cloudAccessProvider, 1000);
-				var flags = new String[]{
+				var flags = new String[] {
 						"-ouid=-1",
 						"-ogid=-1",
 						"-oauto_unmount",
