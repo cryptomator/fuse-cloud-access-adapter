@@ -57,7 +57,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			if (e.getCause() instanceof NoSuchFileException) {
 				return -ErrorCodes.ENOENT();
 			} else {
-				LOG.error("getattr() failed", e); // TODO distinguish causes
+				LOG.error("getattr() failed", e);
 				return -ErrorCodes.EIO();
 			}
 		});
