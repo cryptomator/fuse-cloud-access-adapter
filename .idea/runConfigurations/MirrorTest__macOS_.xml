@@ -1,0 +1,16 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="MirrorTest (macOS)" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="org.cryptomator.fusecloudaccess.MirrorTest$MacMirror" />
+    <module name="FUSE-CloudAccess" />
+    <option name="VM_PARAMETERS" value="-Djava.library.path=&quot;/usr/local/lib/&quot;" />
+    <extension name="coverage">
+      <pattern>
+        <option name="PATTERN" value="org.cryptomator.fusecloudaccess.*" />
+        <option name="ENABLED" value="true" />
+      </pattern>
+    </extension>
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
