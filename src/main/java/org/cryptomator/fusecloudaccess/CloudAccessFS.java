@@ -3,6 +3,7 @@ package org.cryptomator.fusecloudaccess;
 import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudProvider;
+import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.serce.jnrfuse.ErrorCodes;
@@ -12,7 +13,6 @@ import ru.serce.jnrfuse.FuseStubFS;
 import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
@@ -54,7 +54,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			Attributes.copy(metadata, stat);
 			return 0;
 		}).exceptionally(e -> {
-			if (e.getCause() instanceof NoSuchFileException) {
+			if (e.getCause() instanceof NotFoundException) {
 				return -ErrorCodes.ENOENT();
 			} else {
 				LOG.error("getattr() failed", e);
@@ -89,7 +89,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			fi.fh.set(fileHandle);
 			return 0;
 		}).exceptionally(e -> {
-			if (e.getCause() instanceof NoSuchFileException) {
+			if (e.getCause() instanceof NotFoundException) {
 				return -ErrorCodes.ENOENT();
 			} else {
 				LOG.error("open() failed", e);
@@ -137,7 +137,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			return -ErrorCodes.EBADF();
 		}
 		var returnCode = openFile.get().read(buf, offset, size).exceptionally(e -> {
-			if (e.getCause() instanceof NoSuchFileException) {
+			if (e.getCause() instanceof NotFoundException) {
 				return -ErrorCodes.ENOENT();
 			} else {
 				LOG.error("read() failed", e);
