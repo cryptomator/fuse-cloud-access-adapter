@@ -42,7 +42,7 @@
 
 		<!-- compile time dependencies -->
 		<jnrfuse.version>0.5.4</jnrfuse.version>
-		<cloudaccess.version>0.1.0-beta2</cloudaccess.version>
+		<cloudaccess.version>0.1.0-beta3</cloudaccess.version>
 		<slf4j.version>1.7.28</slf4j.version>
 
 		<!-- test dependencies -->
