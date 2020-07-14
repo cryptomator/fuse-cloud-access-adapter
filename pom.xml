@@ -7,6 +7,10 @@
 	<artifactId>fuse-cloud-access-adapter</artifactId>
 	<version>0.1.0</version>
 
+	<name>FUSE to CloudAccess Adapter</name>
+	<description>Adapter between a FUSE frontend and a CloudAccess backend.</description>
+	<url>https://github.com/cryptomator/fuse-cloud-access-adapter</url>
+
 	<developers>
 		<developer>
 			<name>Sebastian Stenzel</name>
