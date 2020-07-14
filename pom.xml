@@ -10,12 +10,18 @@
 	<name>FUSE to CloudAccess Adapter</name>
 	<description>Adapter between a FUSE frontend and a CloudAccess backend.</description>
 	<url>https://github.com/cryptomator/fuse-cloud-access-adapter</url>
-
+	<scm>
+		<connection>scm:git:git@github.com:cryptomator/fuse-cloud-access-adapter.git</connection>
+		<developerConnection>scm:git:git@github.com:cryptomator/fuse-cloud-access-adapter.git</developerConnection>
+		<url>git@github.com:cryptomator/fuse-cloud-access-adapter.git</url>
+	</scm>
 	<developers>
 		<developer>
 			<name>Sebastian Stenzel</name>
 			<email>sebastian.stenzel@skymatic.de</email>
 			<timezone>+1</timezone>
+			<organization>Skymatic GmbH</organization>
+			<organizationUrl>http://skymatic.de</organizationUrl>
 		</developer>
 	</developers>
 
