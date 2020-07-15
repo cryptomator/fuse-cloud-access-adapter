@@ -3,6 +3,7 @@ package org.cryptomator.fusecloudaccess;
 import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudProvider;
+import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.serce.jnrfuse.ErrorCodes;
@@ -61,7 +62,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			Attributes.copy(metadata, stat);
 			return 0;
 		}).exceptionally(e -> {
-			if (e.getCause() instanceof NoSuchFileException) {
+			if (e.getCause() instanceof NotFoundException) {
 				return -ErrorCodes.ENOENT();
 			} else {
 				LOG.error("getattr() failed", e);
