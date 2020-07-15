@@ -1,0 +1,66 @@
+package org.cryptomator.fusecloudaccess;
+
+import org.cryptomator.cloudaccess.api.CloudProvider;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.Mockito;
+import ru.serce.jnrfuse.ErrorCodes;
+
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.stream.Stream;
+
+public class CloudAccessFSTest {
+
+	private static final int TIMEOUT = 5000;
+
+	private CloudAccessFS cloudFs;
+
+	@BeforeEach
+	public void setup() {
+		CloudProvider cloudProvider = Mockito.mock(CloudProvider.class);
+		cloudFs = new CloudAccessFS(cloudProvider, TIMEOUT);
+	}
+
+	@DisplayName("returnOrTimeout(...)")
+	@ParameterizedTest
+	@MethodSource("provideCompletionStages")
+	public void testReturnOrTimeout(CompletionStage<Integer> task, int expectedReturnCode) {
+		Assertions.assertEquals(expectedReturnCode, cloudFs.returnOrTimeout(task));
+	}
+
+
+	private static Stream<Arguments> provideCompletionStages() {
+		return Stream.of(
+				//Arguments.of(futureOfInterrupt(), -ErrorCodes.EINTR()), //interrupted TODO: is this even possible?
+				Arguments.of(futureOfTimeout(), -ErrorCodes.ETIMEDOUT()), //Timeout
+				Arguments.of(futureOfExecutionException(), -ErrorCodes.EIO()), //generic error
+				Arguments.of(CompletableFuture.completedStage(1337), 1337) //input==output
+		);
+	}
+
+	private static CompletionStage<Integer> futureOfExecutionException() {
+		return CompletableFuture.completedFuture(0)
+				.thenApply(i -> {
+					throw new RuntimeException();
+				});
+	}
+
+	private static CompletionStage<Integer> futureOfTimeout() {
+		return CompletableFuture.completedFuture(0)
+				.thenApplyAsync(i -> {
+					try {
+						Thread.currentThread().sleep(TIMEOUT + 1000);
+					} catch (InterruptedException e) {
+						// don't care
+					}
+					return 0;
+				});
+	}
+
+
+}

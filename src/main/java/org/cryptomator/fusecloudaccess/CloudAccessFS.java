@@ -33,7 +33,14 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		this.openFileFactory = new OpenFileFactory(provider);
 	}
 
-	private int returnOrTimeout(CompletionStage<Integer> returnCode) {
+	/**
+	 * Method for async execution.
+	 *
+	 * @apiNote Only visible for testing.
+	 * @param returnCode an integer {@link CompletionStage} to execute
+	 * @return an integer representing one of the FUSE {@link ErrorCodes}
+	 */
+	int returnOrTimeout(CompletionStage<Integer> returnCode) {
 		try {
 			return returnCode.toCompletableFuture().get(timeoutMillis, TimeUnit.MILLISECONDS);
 		} catch (InterruptedException e) {
