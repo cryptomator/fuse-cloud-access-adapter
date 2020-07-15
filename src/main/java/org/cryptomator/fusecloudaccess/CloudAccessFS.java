@@ -65,6 +65,8 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			if (e.getCause() instanceof NotFoundException) {
 				return -ErrorCodes.ENOENT();
 			} else {
+				//TODO: should we distinguish between some exception and CloudProvider exception?
+				// i would say yes, because in returnOrExecute we catch the first ones
 				LOG.error("getattr() failed", e);
 				return -ErrorCodes.EIO();
 			}
