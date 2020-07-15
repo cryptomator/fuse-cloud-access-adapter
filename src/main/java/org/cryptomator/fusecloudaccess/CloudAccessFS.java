@@ -3,7 +3,9 @@ package org.cryptomator.fusecloudaccess;
 import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudProvider;
+import org.cryptomator.cloudaccess.api.exceptions.CloudProviderException;
 import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
+import org.cryptomator.cloudaccess.api.exceptions.TypeMismatchException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.serce.jnrfuse.ErrorCodes;
@@ -37,9 +39,9 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	/**
 	 * Method for async execution.
 	 *
-	 * @apiNote Only visible for testing.
 	 * @param returnCode an integer {@link CompletionStage} to execute
 	 * @return an integer representing one of the FUSE {@link ErrorCodes}
+	 * @apiNote Only visible for testing.
 	 */
 	int returnOrTimeout(CompletionStage<Integer> returnCode) {
 		try {
@@ -77,8 +79,12 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	@Override
 	public int readdir(String path, Pointer buf, FuseFillDir filler, long offset, FuseFileInfo fi) {
 		var returnCode = provider.listExhaustively(Path.of(path)).thenApply(itemList -> {
-			filler.apply(buf, ".", null, 0);
-			filler.apply(buf, "..", null, 0);
+			//if these already return "Buffer full" something 's definitively wrong but still
+			if (filler.apply(buf, ".", null, 0) != 0
+					|| filler.apply(buf, "..", null, 0) != 0) {
+				return -ErrorCodes.ENOMEM();
+			}
+
 			for (var item : itemList.getItems()) {
 				if (filler.apply(buf, item.getName(), null, 0) != 0) {
 					return -ErrorCodes.ENOMEM();
@@ -86,8 +92,20 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			}
 			return 0;
 		}).exceptionally(e -> {
-			LOG.error("readdir() failed", e); // TODO distinguish causes
-			return -ErrorCodes.EIO();
+			final var cause = e.getCause();
+			if (cause instanceof NotFoundException
+					|| cause instanceof TypeMismatchException) {
+				return -ErrorCodes.ENOENT();
+			} else if (cause instanceof CloudProviderException) {
+				//TODO: same questioning as in getattr
+				LOG.error("readdir() failed", e);
+				return -ErrorCodes.EIO();
+				// } else if( cause instanceof InvalidPageTokenException){
+				//	//TODO: what dis?
+			} else {
+				LOG.error("readdir() failed", e);
+				return -ErrorCodes.EIO();
+			}
 		});
 		return returnOrTimeout(returnCode);
 	}
