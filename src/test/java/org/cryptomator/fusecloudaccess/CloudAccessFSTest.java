@@ -46,7 +46,7 @@ public class CloudAccessFSTest {
 	private static CompletionStage<Integer> futureOfExecutionException() {
 		return CompletableFuture.completedFuture(0)
 				.thenApply(i -> {
-					throw new RuntimeException();
+					throw new TestException();
 				});
 	}
 
@@ -60,6 +60,13 @@ public class CloudAccessFSTest {
 					}
 					return 0;
 				});
+	}
+
+	private static class TestException extends RuntimeException {
+		TestException() {
+			super();
+			setStackTrace(new StackTraceElement[]{});
+		}
 	}
 
 
