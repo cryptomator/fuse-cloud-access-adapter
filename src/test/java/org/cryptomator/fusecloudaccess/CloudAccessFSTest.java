@@ -4,6 +4,7 @@ import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -12,6 +13,7 @@ import ru.serce.jnrfuse.ErrorCodes;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 public class CloudAccessFSTest {
@@ -33,10 +35,22 @@ public class CloudAccessFSTest {
 		Assertions.assertEquals(expectedReturnCode, cloudFs.returnOrTimeout(task));
 	}
 
+	@DisplayName("testReturnOrTimoutOnInterrupt")
+	@Test
+	public void testInterrupt() throws InterruptedException {
+		AtomicInteger actualResult = new AtomicInteger();
+		Thread t = new Thread(() -> {
+			actualResult.set(cloudFs.returnOrTimeout(new CompletableFuture<>()));
+		});
+		t.start();
+		t.interrupt();
+		t.join();
+		Assertions.assertEquals(-ErrorCodes.EINTR(), actualResult.get());
+	}
+
 
 	private static Stream<Arguments> provideCompletionStages() {
 		return Stream.of(
-				//Arguments.of(futureOfInterrupt(), -ErrorCodes.EINTR()), //interrupted TODO: is this even possible?
 				Arguments.of(futureOfTimeout(), -ErrorCodes.ETIMEDOUT()), //Timeout
 				Arguments.of(futureOfExecutionException(), -ErrorCodes.EIO()), //generic error
 				Arguments.of(CompletableFuture.completedStage(1337), 1337) //input==output
