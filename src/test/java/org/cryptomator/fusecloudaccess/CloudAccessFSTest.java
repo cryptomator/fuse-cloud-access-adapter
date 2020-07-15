@@ -5,16 +5,11 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mockito;
 import ru.serce.jnrfuse.ErrorCodes;
 
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Stream;
 
 public class CloudAccessFSTest {
 
@@ -28,11 +23,12 @@ public class CloudAccessFSTest {
 		cloudFs = new CloudAccessFS(cloudProvider, TIMEOUT);
 	}
 
-	@DisplayName("returnOrTimeout(...)")
-	@ParameterizedTest
-	@MethodSource("provideCompletionStages")
-	public void testReturnOrTimeout(CompletionStage<Integer> task, int expectedReturnCode) {
-		Assertions.assertEquals(expectedReturnCode, cloudFs.returnOrTimeout(task));
+	@DisplayName("testReturnOrTimoutOnRegularExecution")
+	@Test
+	public void testRegular() {
+		int expectedResult = 1337;
+		var future = CompletableFuture.completedFuture(expectedResult);
+		Assertions.assertEquals(expectedResult, cloudFs.returnOrTimeout(future));
 	}
 
 	@DisplayName("testReturnOrTimoutOnInterrupt")
@@ -48,40 +44,27 @@ public class CloudAccessFSTest {
 		Assertions.assertEquals(-ErrorCodes.EINTR(), actualResult.get());
 	}
 
-
-	private static Stream<Arguments> provideCompletionStages() {
-		return Stream.of(
-				Arguments.of(futureOfTimeout(), -ErrorCodes.ETIMEDOUT()), //Timeout
-				Arguments.of(futureOfExecutionException(), -ErrorCodes.EIO()), //generic error
-				Arguments.of(CompletableFuture.completedStage(1337), 1337) //input==output
-		);
-	}
-
-	private static CompletionStage<Integer> futureOfExecutionException() {
-		return CompletableFuture.completedFuture(0)
+	@DisplayName("testReturnOrTimeoutOnExecutionException")
+	@Test
+	public void testExecution() {
+		CompletableFuture future = CompletableFuture.completedFuture(0)
 				.thenApply(i -> {
 					throw new TestException();
 				});
+		Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.returnOrTimeout(future));
 	}
 
-	private static CompletionStage<Integer> futureOfTimeout() {
-		return CompletableFuture.completedFuture(0)
-				.thenApplyAsync(i -> {
-					try {
-						Thread.currentThread().sleep(TIMEOUT + 1000);
-					} catch (InterruptedException e) {
-						// don't care
-					}
-					return 0;
-				});
+	@DisplayName("testReturnOrTimeoutOnTimeout")
+	@Test
+	public void testTimeout() {
+		Assertions.assertEquals(-ErrorCodes.ETIMEDOUT(), cloudFs.returnOrTimeout(new CompletableFuture<>()));
 	}
 
 	private static class TestException extends RuntimeException {
 		TestException() {
 			super();
-			setStackTrace(new StackTraceElement[]{});
+			setStackTrace(new StackTraceElement[] {});
 		}
 	}
-
 
 }
