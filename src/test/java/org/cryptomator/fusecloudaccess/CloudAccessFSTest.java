@@ -16,7 +16,7 @@ import java.util.stream.Stream;
 
 public class CloudAccessFSTest {
 
-	private static final int TIMEOUT = 5000;
+	private static final int TIMEOUT = 100;
 
 	private CloudAccessFS cloudFs;
 
