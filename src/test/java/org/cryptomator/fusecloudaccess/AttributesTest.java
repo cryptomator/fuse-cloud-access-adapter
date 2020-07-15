@@ -10,11 +10,14 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.ArgumentsProvider;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 import ru.serce.jnrfuse.struct.FileStat;
 
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -45,6 +48,34 @@ public class AttributesTest {
 		);
 	}
 
+	@ParameterizedTest
+	@MethodSource("provideInstantOrNull")
+	public void testMTimeSetCorrectly(Instant i){
+		var expectedInstant = Objects.isNull(i)?Instant.EPOCH : i;
+		Attributes.copy(CloudItemMetadataProvider.ofMTime(i),fileStat);
+
+		Assertions.assertEquals(expectedInstant.getEpochSecond(), fileStat.st_mtim.tv_sec.longValue());
+		Assertions.assertEquals(expectedInstant.getNano(), fileStat.st_mtim.tv_nsec.longValue());
+	}
+
+	private static Stream<Arguments> provideInstantOrNull(){
+		return Stream.of(
+				Arguments.of(Instant.now()),
+				Arguments.of((Instant) null)
+		);
+	}
+
+	@ParameterizedTest
+	@NullSource
+	@ValueSource(longs = {123456L})
+	public void testSizeSetCorrectly(Long size){
+		final long expectedSize = Objects.isNull(size)? 0 : size;
+		Attributes.copy(CloudItemMetadataProvider.ofSize(size),fileStat);
+		Assertions.assertEquals(expectedSize, fileStat.st_size.longValue());
+
+	}
+
+
 	private static class CloudItemMetadataProvider {
 
 		private static final String DEFAULT_NAME = "unknown.obj";
@@ -53,8 +84,8 @@ public class AttributesTest {
 		private static final Instant DEFAULT_MTIME = Instant.now();
 		private static final long DEFAULT_SIZE = 1337L;
 
-		public static CloudItemMetadata of(String name, Path p, CloudItemType type,  Instant mTime ,long size){
-			return new CloudItemMetadata(name, p, type, Optional.of(mTime), Optional.of(size));
+		public static CloudItemMetadata of(String name, Path p, CloudItemType type, Instant mTime ,Long size){
+			return new CloudItemMetadata(name, p, type, Optional.ofNullable(mTime), Optional.ofNullable(size));
 		}
 
 		public static CloudItemMetadata ofName(String name){
@@ -73,7 +104,7 @@ public class AttributesTest {
 			return CloudItemMetadataProvider.of(DEFAULT_NAME, DEFAULT_PATH, DEFAULT_TYPE,mTime,DEFAULT_SIZE);
 		}
 
-		public static CloudItemMetadata ofSize( long size){
+		public static CloudItemMetadata ofSize(Long size){
 			return CloudItemMetadataProvider.of(DEFAULT_NAME, DEFAULT_PATH, DEFAULT_TYPE,DEFAULT_MTIME,size);
 		}
 	}
