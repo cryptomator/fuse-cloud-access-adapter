@@ -9,9 +9,18 @@
 
 	<developers>
 		<developer>
+			<name>Armin Schrenk</name>
+			<email>armin.schrenk@skymatic.de</email>
+			<timezone>+1</timezone>
+			<organization>Skymatic GmbH</organization>
+			<organizationUrl>http://skymatic.de</organizationUrl>
+		</developer>
+		<developer>
 			<name>Sebastian Stenzel</name>
 			<email>sebastian.stenzel@skymatic.de</email>
 			<timezone>+1</timezone>
+			<organization>Skymatic GmbH</organization>
+			<organizationUrl>http://skymatic.de</organizationUrl>
 		</developer>
 	</developers>
 
@@ -42,7 +51,7 @@
 
 		<!-- compile time dependencies -->
 		<jnrfuse.version>0.5.4</jnrfuse.version>
-		<cloudaccess.version>0.1.0-beta2</cloudaccess.version>
+		<cloudaccess.version>0.1.0</cloudaccess.version>
 		<slf4j.version>1.7.28</slf4j.version>
 
 		<!-- test dependencies -->
