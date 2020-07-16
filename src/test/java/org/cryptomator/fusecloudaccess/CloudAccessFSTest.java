@@ -198,13 +198,13 @@ public class CloudAccessFSTest {
 		}
 
 		@Test
-		public void testNotADirectoryReturnsENOENT() {
+		public void testNotADirectoryReturnsENOTDIR() {
 			FuseFillDirImpl filler = FuseFillDirImpl.getENOMEMFiller();
 
 			Mockito.when(provider.listExhaustively(PATH))
 					.thenReturn(CompletableFuture.failedFuture(new TypeMismatchException()));
 
-			Assertions.assertEquals(-ErrorCodes.ENOENT(), cloudFs.readdir(PATH.toString(), buf, filler, OFFSET, fi));
+			Assertions.assertEquals(-ErrorCodes.ENOTDIR(), cloudFs.readdir(PATH.toString(), buf, filler, OFFSET, fi));
 		}
 
 		@Test

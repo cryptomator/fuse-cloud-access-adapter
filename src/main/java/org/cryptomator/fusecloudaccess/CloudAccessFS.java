@@ -93,9 +93,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			return 0;
 		}).exceptionally(e -> {
 			final var cause = e.getCause();
-			if (cause instanceof NotFoundException
-					|| cause instanceof TypeMismatchException) {
+			if (cause instanceof NotFoundException){
 				return -ErrorCodes.ENOENT();
+			} else if (cause instanceof TypeMismatchException) {
+				return -ErrorCodes.ENOTDIR(); //TODO: correct?
 			} else if (cause instanceof CloudProviderException) {
 				//TODO: same questioning as in getattr
 				LOG.error("readdir() failed", e);
