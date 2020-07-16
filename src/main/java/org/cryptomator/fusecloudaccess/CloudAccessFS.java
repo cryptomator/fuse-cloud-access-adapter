@@ -4,6 +4,7 @@ import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.exceptions.CloudProviderException;
+import org.cryptomator.cloudaccess.api.exceptions.InvalidPageTokenException;
 import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
 import org.cryptomator.cloudaccess.api.exceptions.TypeMismatchException;
 import org.slf4j.Logger;
@@ -67,8 +68,6 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			if (e.getCause() instanceof NotFoundException) {
 				return -ErrorCodes.ENOENT();
 			} else {
-				//TODO: should we distinguish between some exception and CloudProvider exception?
-				// i would say yes, because in returnOrExecute we catch the first ones
 				LOG.error("getattr() failed", e);
 				return -ErrorCodes.EIO();
 			}
@@ -97,12 +96,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 				return -ErrorCodes.ENOENT();
 			} else if (cause instanceof TypeMismatchException) {
 				return -ErrorCodes.ENOTDIR(); //TODO: correct?
-			} else if (cause instanceof CloudProviderException) {
-				//TODO: same questioning as in getattr
+			} else if (cause instanceof InvalidPageTokenException) {
+				//TODO: maybe different return code
 				LOG.error("readdir() failed", e);
 				return -ErrorCodes.EIO();
-				// } else if( cause instanceof InvalidPageTokenException){
-				//	//TODO: what dis?
 			} else {
 				LOG.error("readdir() failed", e);
 				return -ErrorCodes.EIO();

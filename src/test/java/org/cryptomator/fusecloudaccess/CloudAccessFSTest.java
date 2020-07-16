@@ -135,7 +135,6 @@ public class CloudAccessFSTest {
 	//TODO: good displayNames
 	static class ReadDirTests {
 
-		private static final Runtime RUNTIME = Runtime.getSystemRuntime();
 		private static final long OFFSET = 0L;
 		private static final Path PATH = Path.of("some/path/to/resource");
 		private static final List<CloudItemMetadata> ITEM_LISTING = List.of(
@@ -159,7 +158,7 @@ public class CloudAccessFSTest {
 		}
 
 		@Test
-		public void testSuccessAndReturnedList() {
+		public void testCompletedListingReturns0AndCopiesCompleteList() {
 			FuseFillDirImpl filler = FuseFillDirImpl.getUnlimitedFiller();
 
 			var expectedListing = new ArrayList<String>();
