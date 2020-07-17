@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 public class CloudAccessFSTest {
@@ -38,7 +39,7 @@ public class CloudAccessFSTest {
 		cloudFs = new CloudAccessFS(cloudProvider, TIMEOUT);
 	}
 
-	@DisplayName("testReturnOrTimoutOnRegularExecution")
+	@DisplayName("test returnOrTimeout() returns expected result on regular execution")
 	@Test
 	public void testRegular() {
 		int expectedResult = 1337;
@@ -46,7 +47,7 @@ public class CloudAccessFSTest {
 		Assertions.assertEquals(expectedResult, cloudFs.returnOrTimeout(future));
 	}
 
-	@DisplayName("testReturnOrTimoutOnInterrupt")
+	@DisplayName("test returnOrTimeout() returns EINTR on interrupt")
 	@Test
 	public void testInterrupt() throws InterruptedException {
 		AtomicInteger actualResult = new AtomicInteger();
@@ -59,30 +60,19 @@ public class CloudAccessFSTest {
 		Assertions.assertEquals(-ErrorCodes.EINTR(), actualResult.get());
 	}
 
-	@DisplayName("testReturnOrTimeoutOnExecutionException")
+	@DisplayName("test returnOrTimeout() returns EIO on ExecutionException")
 	@Test
 	public void testExecution() {
-		CompletableFuture future = CompletableFuture.completedFuture(0)
-				.thenApply(i -> {
-					throw new TestException();
-				});
+		CompletableFuture future = CompletableFuture.failedFuture(new Exception());
 		Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.returnOrTimeout(future));
 	}
 
-	@DisplayName("testReturnOrTimeoutOnTimeout")
+	@DisplayName("test returnOrTimeout() return ETIMEDOUT on timeout")
 	@Test
 	public void testTimeout() {
 		Assertions.assertEquals(-ErrorCodes.ETIMEDOUT(), cloudFs.returnOrTimeout(new CompletableFuture<>()));
 	}
 
-	private static class TestException extends RuntimeException {
-		TestException() {
-			super();
-			setStackTrace(new StackTraceElement[] {});
-		}
-	}
-
-	//TODO: use good displayable names!
 	static class GetAttrTests {
 
 		private static final Runtime RUNTIME = Runtime.getSystemRuntime();
@@ -99,6 +89,7 @@ public class CloudAccessFSTest {
 			fileStat = new FileStat(RUNTIME);
 		}
 
+		@DisplayName("getAttr() returns 0 on success")
 		@Test
 		public void testGetAttrSuccess() {
 			Mockito.when(provider.itemMetadata(PATH))
@@ -107,6 +98,7 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(0, cloudFs.getattr(PATH.toString(), fileStat));
 		}
 
+		@DisplayName("getAttr() returns ENOENT when resource is not found.")
 		@Test
 		public void testGetAttrNotFound() {
 			Mockito.when(provider.itemMetadata(PATH))
@@ -115,6 +107,7 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.ENOENT(), cloudFs.getattr(PATH.toString(), fileStat));
 		}
 
+		@DisplayName("getAttr() returns EIO on CloudProviderException.")
 		@Test
 		public void testGetAttrCloudError() {
 			Mockito.when(provider.itemMetadata(PATH))
@@ -123,16 +116,17 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.getattr(PATH.toString(), fileStat));
 		}
 
+		@DisplayName("getAttr() returns EIO on any exception.")
 		@Test
 		public void testGetAttrSomeException() {
 			Mockito.when(provider.itemMetadata(PATH))
-					.thenReturn(CompletableFuture.failedFuture(new RuntimeException()));
+					.thenReturn(CompletableFuture.failedFuture(new Exception()));
 
 			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.getattr(PATH.toString(), fileStat));
 		}
 	}
 
-	//TODO: good displayNames
+	//@Nested
 	static class ReadDirTests {
 
 		private static final long OFFSET = 0L;
@@ -157,8 +151,9 @@ public class CloudAccessFSTest {
 			fi = Mockito.mock(FuseFileInfo.class);
 		}
 
+		@DisplayName("Successful readdir() returns 0 and copies all elements")
 		@Test
-		public void testCompletedListingReturns0AndCopiesCompleteList() {
+		public void testSuccess() {
 			FuseFillDirImpl filler = FuseFillDirImpl.getUnlimitedFiller();
 
 			var expectedListing = new ArrayList<String>();
@@ -173,6 +168,7 @@ public class CloudAccessFSTest {
 			Assertions.assertIterableEquals(expectedListing, filler.getListing());
 		}
 
+		@DisplayName("readdir() returns ENOMEM if output buffer is full")
 		@Test
 		public void testFullNativeBufferReturnsENOMEM() {
 			FuseFillDirImpl filler = FuseFillDirImpl.getENOMEMFiller();
@@ -184,10 +180,10 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.ENOMEM(), cloudFs.readdir(PATH.toString(), buf, filler, OFFSET, fi));
 		}
 
+		@DisplayName("readdir() returns ENOENT when directory not found")
 		@Test
 		public void testNotFoundReturnsENOENT() {
 			FuseFillDirImpl filler = FuseFillDirImpl.getENOMEMFiller();
-			assert filler.apply(buf, ByteBuffer.wrap(new byte[] {}), buf, OFFSET) != 0;
 
 			Mockito.when(provider.listExhaustively(PATH))
 					.thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
@@ -196,6 +192,7 @@ public class CloudAccessFSTest {
 
 		}
 
+		@DisplayName("readdir() returns ENOTDIR when resource is not a directory")
 		@Test
 		public void testNotADirectoryReturnsENOTDIR() {
 			FuseFillDirImpl filler = FuseFillDirImpl.getENOMEMFiller();
@@ -206,6 +203,7 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.ENOTDIR(), cloudFs.readdir(PATH.toString(), buf, filler, OFFSET, fi));
 		}
 
+		@DisplayName("readdir() returns EIO on CloudProviderException ")
 		@Test
 		public void testCloudProviderExceptionReturnsEIO() {
 			FuseFillDirImpl filler = FuseFillDirImpl.getENOMEMFiller();
@@ -216,6 +214,7 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.readdir(PATH.toString(), buf, filler, OFFSET, fi));
 		}
 
+		@DisplayName("readdir() returns EIO on InvalidPageTokenException")
 		@Test
 		public void testInvalidTokenReturnsEIO() {
 			FuseFillDirImpl filler = FuseFillDirImpl.getENOMEMFiller();
@@ -226,6 +225,7 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.readdir(PATH.toString(), buf, filler, OFFSET, fi));
 		}
 
+		@DisplayName("readdir() returns EIO on any other exception")
 		@Test
 		public void testAnyExceptionReturnsEIO() {
 			FuseFillDirImpl filler = FuseFillDirImpl.getENOMEMFiller();
