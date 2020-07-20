@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -286,6 +287,76 @@ public class CloudAccessFSTest {
 			Mockito.when(provider.itemMetadata(PATH))
 					.thenReturn(CompletableFuture.failedFuture(new Exception()));
 			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.open(PATH.toString(), fi));
+		}
+
+	}
+
+	static class ReadTest {
+
+		//public int read(String path, Pointer buf, long size, long offset, FuseFileInfo fi)
+		private static final Path PATH = Path.of("some/path/to/resource");
+		private static final OpenFile FILE = Mockito.mock(OpenFile.class);
+		private static final Pointer BUF = Mockito.mock(Pointer.class);
+		private static final long SIZE = 2L;
+		private static final long OFFSET = 1L;
+
+		private OpenFileFactory fileFactory;
+		private CloudAccessFS cloudFs;
+		private TestFileInfo fi;
+
+		@BeforeEach
+		public void setup() {
+			fileFactory = Mockito.mock(OpenFileFactory.class);
+			cloudFs = new CloudAccessFS(Mockito.mock(CloudProvider.class), CloudAccessFSTest.TIMEOUT, fileFactory);
+			fi = TestFileInfo.create();
+		}
+
+		@DisplayName("read() returns 0 on success")
+		@Test
+		public void testSuccessfulReadReturnsZero() {
+			Mockito.when(fileFactory.get(Mockito.anyLong()))
+					.thenReturn(Optional.of(FILE));
+			Mockito.when(FILE.read(BUF, OFFSET, SIZE))
+					.thenReturn(CompletableFuture.completedFuture(0));
+			Assertions.assertEquals(0, cloudFs.read(PATH.toString(), BUF, SIZE, OFFSET, fi));
+		}
+
+		@DisplayName("read() returns ENOENT if resource is not found")
+		@Test
+		public void testNotFoundExceptionReturnsENOENT() {
+			Mockito.when(fileFactory.get(Mockito.anyLong()))
+					.thenReturn(Optional.of(FILE));
+			Mockito.when(FILE.read(BUF, OFFSET, SIZE))
+					.thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
+			Assertions.assertEquals(-ErrorCodes.ENOENT(), cloudFs.read(PATH.toString(), BUF, SIZE, OFFSET, fi));
+		}
+
+		@DisplayName("read() returns EIO if CloudProviderException occurs")
+		@Test
+		public void testCloudProviderExceptionReturnsEIO() {
+			Mockito.when(fileFactory.get(Mockito.anyLong()))
+					.thenReturn(Optional.of(FILE));
+			Mockito.when(FILE.read(BUF, OFFSET, SIZE))
+					.thenReturn(CompletableFuture.failedFuture(new CloudProviderException()));
+			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.read(PATH.toString(), BUF, SIZE, OFFSET, fi));
+		}
+
+		@DisplayName("read() returns EIO if any exception occurs")
+		@Test
+		public void testAnyExceptionReturnsEIO() {
+			Mockito.when(fileFactory.get(Mockito.anyLong()))
+					.thenReturn(Optional.of(FILE));
+			Mockito.when(FILE.read(BUF, OFFSET, SIZE))
+					.thenReturn(CompletableFuture.failedFuture(new Exception()));
+			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.read(PATH.toString(), BUF, SIZE, OFFSET, fi));
+		}
+
+		@DisplayName("read() returns EBADF if file is not opened before")
+		@Test
+		public void testNotExistingHandleReturnsEBADF() {
+			Mockito.when(fileFactory.get(Mockito.anyLong()))
+					.thenReturn(Optional.empty());
+			Assertions.assertEquals(-ErrorCodes.EBADF(), cloudFs.read(PATH.toString(), BUF, SIZE, OFFSET, fi));
 		}
 
 	}

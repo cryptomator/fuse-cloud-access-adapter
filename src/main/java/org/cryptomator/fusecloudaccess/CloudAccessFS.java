@@ -32,9 +32,14 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	private final OpenFileFactory openFileFactory;
 
 	public CloudAccessFS(CloudProvider provider, int timeoutMillis) {
+		this(provider,timeoutMillis,new OpenFileFactory(provider));
+	}
+
+	//Visible for testing
+	CloudAccessFS(CloudProvider provider, int timeoutMillis, OpenFileFactory openFileFactory){
 		this.provider = provider;
 		this.timeoutMillis = timeoutMillis;
-		this.openFileFactory = new OpenFileFactory(provider);
+		this.openFileFactory = openFileFactory;
 	}
 
 	/**
@@ -163,7 +168,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			return -ErrorCodes.EBADF();
 		}
 		var returnCode = openFile.get().read(buf, offset, size).exceptionally(e -> {
-			if (e.getCause() instanceof NoSuchFileException) {
+			if (e instanceof NotFoundException) {
 				return -ErrorCodes.ENOENT();
 			} else {
 				LOG.error("read() failed", e);
