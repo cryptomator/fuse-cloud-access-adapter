@@ -239,28 +239,41 @@ public class CloudAccessFSTest {
 	static class OpenTest {
 
 		private CloudProvider provider;
+		private OpenFileFactory fileFactory;
 		private CloudAccessFS cloudFs;
 		private TestFileInfo fi;
 
 		@BeforeEach
 		public void setup() {
 			provider = Mockito.mock(CloudProvider.class);
-			cloudFs = new CloudAccessFS(provider, CloudAccessFSTest.TIMEOUT);
+			fileFactory = Mockito.mock(OpenFileFactory.class);
+			cloudFs = new CloudAccessFS(provider, CloudAccessFSTest.TIMEOUT, fileFactory);
 			fi = TestFileInfo.create();
 		}
 
-		@DisplayName("open() returns 0 in success and writes to FileInfo.fh")
+		@DisplayName("open() returns 0 in success and writes the handle to field FileInfo.fh")
 		@Test
 		public void testSuccessfulOpenReturnsZeroAndStoresHandle() {
-			//this test ain't the best, because it tests if the filehande value changes rather than checks if fh.set() is called.
-			long beforeHandleVal = -1;
-			fi.fh.set(beforeHandleVal);
+			long expectedHandle = 1337;
+
+			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet())).thenReturn(1337L);
 
 			Mockito.when(provider.itemMetadata(PATH))
 					.thenReturn(CompletableFuture.completedFuture(CloudItemMetadataProvider.ofPath(PATH)));
 			Assertions.assertEquals(0, cloudFs.open(PATH.toString(), fi));
-			Assertions.assertNotEquals(beforeHandleVal, fi.fh.get());
+			Assertions.assertEquals(expectedHandle, fi.fh.get());
 		}
+
+		@DisplayName("open() returns ECANCELED on ClosedOpenFileFactoryException.")
+		@Test
+		public void testClosedFileFactoryExceptionReturnsECANCELED() {
+			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet())).thenThrow(ClosedOpenFileFactoryException.class);
+			Mockito.when(provider.itemMetadata(PATH))
+					.thenReturn(CompletableFuture.completedFuture(CloudItemMetadataProvider.ofPath(PATH)));
+			Assertions.assertEquals(-ErrorCodes.ECANCELED(), cloudFs.open(PATH.toString(), fi));
+
+		}
+
 
 		@DisplayName("open() returns ENOENT if the specified path is not found")
 		@Test
