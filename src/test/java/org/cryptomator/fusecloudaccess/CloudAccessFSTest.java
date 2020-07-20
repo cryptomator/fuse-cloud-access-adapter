@@ -30,6 +30,7 @@ import java.util.stream.Collectors;
 public class CloudAccessFSTest {
 
 	static final int TIMEOUT = 100;
+	static final Path PATH = Path.of("some/path/to/resource");
 
 	private CloudAccessFS cloudFs;
 
@@ -76,7 +77,6 @@ public class CloudAccessFSTest {
 	static class GetAttrTests {
 
 		private static final Runtime RUNTIME = Runtime.getSystemRuntime();
-		private static final Path PATH = Path.of("some/path/to/resource");
 
 		private CloudProvider provider;
 		private CloudAccessFS cloudFs;
@@ -130,7 +130,6 @@ public class CloudAccessFSTest {
 	static class ReadDirTests {
 
 		private static final long OFFSET = 0L;
-		private static final Path PATH = Path.of("some/path/to/resource");
 		private static final List<CloudItemMetadata> ITEM_LISTING = List.of(
 				CloudItemMetadataProvider.ofPath(PATH.resolve("asd")),
 				CloudItemMetadataProvider.ofPath(PATH.resolve("qwe")),
@@ -239,8 +238,6 @@ public class CloudAccessFSTest {
 
 	static class OpenTest {
 
-		private static final Path PATH = Path.of("some/path/to/resource");
-
 		private CloudProvider provider;
 		private CloudAccessFS cloudFs;
 		private TestFileInfo fi;
@@ -293,8 +290,6 @@ public class CloudAccessFSTest {
 
 	static class ReadTest {
 
-		//public int read(String path, Pointer buf, long size, long offset, FuseFileInfo fi)
-		private static final Path PATH = Path.of("some/path/to/resource");
 		private static final OpenFile FILE = Mockito.mock(OpenFile.class);
 		private static final Pointer BUF = Mockito.mock(Pointer.class);
 		private static final long SIZE = 2L;
@@ -359,6 +354,31 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.EBADF(), cloudFs.read(PATH.toString(), BUF, SIZE, OFFSET, fi));
 		}
 
+	}
+
+	static class DestroyTest {
+
+		private CloudProvider provider;
+		private OpenFileFactory fileFactory;
+		private CloudAccessFS cloudFs;
+		private TestFileInfo fi;
+
+		@BeforeEach
+		public void setup() {
+			provider = Mockito.mock(CloudProvider.class);
+			fileFactory = Mockito.mock(OpenFileFactory.class);
+			cloudFs = new CloudAccessFS(provider, CloudAccessFSTest.TIMEOUT, fileFactory);
+			fi = TestFileInfo.create();
+		}
+
+		@Test
+		public void testAfterDestroyFilesCannotBeOpened() {
+			Mockito.when(provider.itemMetadata(PATH))
+					.thenReturn(CompletableFuture.completedFuture(CloudItemMetadataProvider.ofPath(PATH)));
+			Pointer p = Mockito.mock(Pointer.class);
+			cloudFs.destroy(p);
+			Mockito.verify(fileFactory).close();
+		}
 	}
 
 }

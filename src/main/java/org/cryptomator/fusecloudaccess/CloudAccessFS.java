@@ -122,6 +122,8 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		}).exceptionally(e -> {
 			if (e.getCause() instanceof NotFoundException) {
 				return -ErrorCodes.ENOENT();
+			} else if(e.getCause() instanceof ClosedOpenFileFactoryException) {
+				return -ErrorCodes.ECANCELED();
 			} else {
 				LOG.error("open() failed", e);
 				return -ErrorCodes.EIO();
@@ -183,4 +185,9 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 //		return super.write(path, buf, size, offset, fi);
 //	}
 
+
+	@Override
+	public void destroy(Pointer initResult) {
+		openFileFactory.close();
+	}
 }
