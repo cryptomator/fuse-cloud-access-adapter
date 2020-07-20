@@ -115,7 +115,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			fi.fh.set(fileHandle);
 			return 0;
 		}).exceptionally(e -> {
-			if (e.getCause() instanceof NoSuchFileException) {
+			if (e.getCause() instanceof NotFoundException) {
 				return -ErrorCodes.ENOENT();
 			} else {
 				LOG.error("open() failed", e);

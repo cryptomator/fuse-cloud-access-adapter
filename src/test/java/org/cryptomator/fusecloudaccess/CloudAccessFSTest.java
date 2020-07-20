@@ -24,7 +24,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 public class CloudAccessFSTest {
@@ -236,4 +235,59 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.readdir(PATH.toString(), buf, filler, OFFSET, fi));
 		}
 	}
+
+	static class OpenTest {
+
+		private static final Path PATH = Path.of("some/path/to/resource");
+
+		private CloudProvider provider;
+		private CloudAccessFS cloudFs;
+		private TestFileInfo fi;
+
+		@BeforeEach
+		public void setup() {
+			provider = Mockito.mock(CloudProvider.class);
+			cloudFs = new CloudAccessFS(provider, CloudAccessFSTest.TIMEOUT);
+			fi = TestFileInfo.create();
+		}
+
+		@DisplayName("open() returns 0 in success and writes to FileInfo.fh")
+		@Test
+		public void testSuccessfulOpenReturnsZeroAndStoresHandle() {
+			//this test ain't the best, because it tests if the filehande value changes rather than checks if fh.set() is called.
+			long beforeHandleVal = -1;
+			fi.fh.set(beforeHandleVal);
+
+			Mockito.when(provider.itemMetadata(PATH))
+					.thenReturn(CompletableFuture.completedFuture(CloudItemMetadataProvider.ofPath(PATH)));
+			Assertions.assertEquals(0, cloudFs.open(PATH.toString(), fi));
+			Assertions.assertNotEquals(beforeHandleVal, fi.fh.get());
+		}
+
+		@DisplayName("open() returns ENOENT if the specified path is not found")
+		@Test
+		public void testNotFoundExceptionReturnsENOENT() {
+			Mockito.when(provider.itemMetadata(PATH))
+					.thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
+			Assertions.assertEquals(-ErrorCodes.ENOENT(), cloudFs.open(PATH.toString(), fi));
+		}
+
+		@DisplayName("open() returns EIO if an IO error occured at the provider side")
+		@Test
+		public void testCloudProviderExceptionReturnsEIO() {
+			Mockito.when(provider.itemMetadata(PATH))
+					.thenReturn(CompletableFuture.failedFuture(new CloudProviderException()));
+			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.open(PATH.toString(), fi));
+		}
+
+		@DisplayName("open() returns generic EIO if any exception is thrown")
+		@Test
+		public void testAnyExceptionReturnsEIO() {
+			Mockito.when(provider.itemMetadata(PATH))
+					.thenReturn(CompletableFuture.failedFuture(new Exception()));
+			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.open(PATH.toString(), fi));
+		}
+
+	}
+
 }
