@@ -1,6 +1,5 @@
 package org.cryptomator.fusecloudaccess;
 
-import com.google.common.base.Preconditions;
 import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudProvider;
@@ -39,9 +38,9 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	/**
 	 * Method for async execution.
 	 *
-	 * @apiNote Only visible for testing.
 	 * @param returnCode an integer {@link CompletionStage} to execute
 	 * @return an integer representing one of the FUSE {@link ErrorCodes}
+	 * @apiNote Only visible for testing.
 	 */
 	int returnOrTimeout(CompletionStage<Integer> returnCode) {
 		try {
@@ -81,7 +80,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			fi.fh.set(dirHandle);
 			return 0;
 		}).exceptionally(e -> {
-			if (e.getCause() instanceof NotFoundException) {
+			if (e.getCause() instanceof NoSuchFileException) {
 				return -ErrorCodes.ENOENT();
 			} else {
 				LOG.error("open() failed", e);
