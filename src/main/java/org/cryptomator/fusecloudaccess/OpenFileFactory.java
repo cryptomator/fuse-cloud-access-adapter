@@ -5,23 +5,20 @@ import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.Closeable;
 import java.nio.file.Path;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
-class OpenFileFactory implements Closeable {
+class OpenFileFactory {
 
     private static final Logger LOG = LoggerFactory.getLogger(OpenFileFactory.class);
 
     private final ConcurrentMap<Long, OpenFile> openFiles = new ConcurrentHashMap<>();
     private final AtomicLong fileHandleGen = new AtomicLong();
     private final CloudProvider provider;
-    private final AtomicBoolean isClosed = new AtomicBoolean(false);
 
     public OpenFileFactory(CloudProvider provider) {
         this.provider = provider;
@@ -33,15 +30,11 @@ class OpenFileFactory implements Closeable {
      * @return file handle used to identify and close open files.
      */
     public long open(Path path, Set<OpenFlags> flags) {
-    	if( !isClosed.get()){
             long fileHandle = fileHandleGen.getAndIncrement();
             OpenFile file = new OpenFile(provider, path, flags);
             openFiles.put(fileHandle, file);
             LOG.trace("Opening {} {}", fileHandle, file);
             return fileHandle;
-        } else {
-    	    throw new ClosedOpenFileFactoryException();
-        }
     }
 
     public Optional<OpenFile> get(long fileHandle) {
@@ -54,22 +47,12 @@ class OpenFileFactory implements Closeable {
      * @param fileHandle file handle used to identify
      */
     public void close(long fileHandle) {
-    	if( !isClosed.get()){
             OpenFile file = openFiles.remove(fileHandle);
             if (file != null) {
                 LOG.trace("Releasing {} {}", fileHandle, file);
             }else {
                 LOG.trace("No open file with handle {} found.", fileHandle);
             }
-        }
     }
 
-    /**
-     * Closes this factory and all still open files
-     */
-    @Override
-    public void close() {
-        isClosed.set(true);
-        openFiles.clear();
-    }
 }

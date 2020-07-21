@@ -267,17 +267,6 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(expectedHandle, fi.fh.get());
 		}
 
-		@DisplayName("open() returns ECANCELED on ClosedOpenFileFactoryException.")
-		@Test
-		public void testClosedFileFactoryExceptionReturnsECANCELED() {
-			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet())).thenThrow(ClosedOpenFileFactoryException.class);
-			Mockito.when(provider.itemMetadata(PATH))
-					.thenReturn(CompletableFuture.completedFuture(CloudItemMetadataProvider.ofPath(PATH)));
-			Assertions.assertEquals(-ErrorCodes.ECANCELED(), cloudFs.open(PATH.toString(), fi));
-
-		}
-
-
 		@DisplayName("open() returns ENOENT if the specified path is not found")
 		@Test
 		public void testNotFoundExceptionReturnsENOENT() {

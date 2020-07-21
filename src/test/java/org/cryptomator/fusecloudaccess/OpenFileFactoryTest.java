@@ -74,24 +74,4 @@ public class OpenFileFactoryTest {
 		Assertions.assertTrue(actualFileOpen.isPresent());
 	}
 
-	@Test
-	public void testAutoclosableCloseClosesAllHandles() {
-		long handle1 = openFiles.open(PATH, OPEN_FLAGS);
-		long handle2 = openFiles.open(PATH, OPEN_FLAGS);
-		assert openFiles.get(handle1).isPresent() && openFiles.get(handle2).isPresent();
-
-		openFiles.close();
-		var actualFile1 = openFiles.get(handle1);
-		var actualFile2 = openFiles.get(handle2);
-
-		Assertions.assertTrue(actualFile1.isEmpty());
-		Assertions.assertTrue(actualFile2.isEmpty());
-	}
-
-	@Test
-	public void testClosedFactoryThrowsException() {
-		openFiles.close();
-		Assertions.assertThrows(ClosedOpenFileFactoryException.class, () -> openFiles.open(PATH, OPEN_FLAGS));
-	}
-
 }
