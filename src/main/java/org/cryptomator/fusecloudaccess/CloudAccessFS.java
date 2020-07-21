@@ -1,5 +1,6 @@
 package org.cryptomator.fusecloudaccess;
 
+import com.google.common.base.Preconditions;
 import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudProvider;
@@ -26,11 +27,13 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	private final CloudProvider provider;
 	private final int timeoutMillis;
 	private final OpenFileFactory openFileFactory;
+	private final OpenDirFactory openDirFactory;
 
 	public CloudAccessFS(CloudProvider provider, int timeoutMillis) {
 		this.provider = provider;
 		this.timeoutMillis = timeoutMillis;
 		this.openFileFactory = new OpenFileFactory(provider);
+		this.openDirFactory = new OpenDirFactory(provider);
 	}
 
 	/**
@@ -72,21 +75,45 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	@Override
-	public int readdir(String path, Pointer buf, FuseFillDir filler, long offset, FuseFileInfo fi) {
-		var returnCode = provider.listExhaustively(Path.of(path)).thenApply(itemList -> {
-			filler.apply(buf, ".", null, 0);
-			filler.apply(buf, "..", null, 0);
-			for (var item : itemList.getItems()) {
-				if (filler.apply(buf, item.getName(), null, 0) != 0) {
-					return -ErrorCodes.ENOMEM();
-				}
-			}
+	public int opendir(String path, FuseFileInfo fi) {
+		var returnCode = provider.itemMetadata(Path.of(path)).thenApply(metadata -> {
+			long dirHandle = openDirFactory.open(Path.of(path));
+			fi.fh.set(dirHandle);
 			return 0;
 		}).exceptionally(e -> {
+			if (e.getCause() instanceof NotFoundException) {
+				return -ErrorCodes.ENOENT();
+			} else {
+				LOG.error("open() failed", e);
+				return -ErrorCodes.EIO();
+			}
+		});
+		return returnOrTimeout(returnCode);
+	}
+
+	@Override
+	public int readdir(String path, Pointer buf, FuseFillDir filler, long offset, FuseFileInfo fi) {
+		if (offset > Integer.MAX_VALUE) {
+			LOG.error("readdir() only supported for up to 2^31 entries, but attempted to read from offset {}", offset);
+			return -ErrorCodes.EOVERFLOW();
+		}
+
+		var openDir = openDirFactory.get(fi.fh.get());
+		if (openDir.isEmpty()) {
+			return -ErrorCodes.EBADF();
+		}
+
+		var returnCode = openDir.get().list(buf, filler, (int) offset).exceptionally(e -> {
 			LOG.error("readdir() failed", e); // TODO distinguish causes
 			return -ErrorCodes.EIO();
 		});
 		return returnOrTimeout(returnCode);
+	}
+
+	@Override
+	public int releasedir(String path, FuseFileInfo fi) {
+		openDirFactory.close(fi.fh.get());
+		return 0;
 	}
 
 	@Override

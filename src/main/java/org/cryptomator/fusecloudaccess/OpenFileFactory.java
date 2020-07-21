@@ -33,7 +33,7 @@ class OpenFileFactory {
         long fileHandle = fileHandleGen.getAndIncrement();
         OpenFile file = new OpenFile(provider, path, flags);
         openFiles.put(fileHandle, file);
-        LOG.trace("Opening {} {}", fileHandle, file);
+        LOG.trace("Opening file {} {}", fileHandle, file);
         return fileHandle;
     }
 
@@ -49,7 +49,7 @@ class OpenFileFactory {
     public void close(long fileHandle) {
         OpenFile file = openFiles.remove(fileHandle);
         if (file != null) {
-            LOG.trace("Releasing {} {}", fileHandle, file);
+            LOG.trace("Releasing file {} {}", fileHandle, file);
         }
     }
 
