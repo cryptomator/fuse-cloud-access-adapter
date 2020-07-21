@@ -15,10 +15,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import ru.serce.jnrfuse.ErrorCodes;
+import ru.serce.jnrfuse.FuseFillDir;
 import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 
-import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -151,28 +151,33 @@ public class CloudAccessFSTest {
 			fi = Mockito.mock(FuseFileInfo.class);
 		}
 
-		@DisplayName("Successful readdir() returns 0 and copies all elements")
+		@DisplayName("Successful readdir() returns 0 and lists all elements")
 		@Test
 		public void testSuccess() {
-			FuseFillDirImpl filler = FuseFillDirImpl.getUnlimitedFiller();
-
 			var expectedListing = new ArrayList<String>();
 			expectedListing.add(".");
 			expectedListing.add("..");
 			expectedListing.addAll(ITEM_LISTING.stream().map(CloudItemMetadata::getName).collect(Collectors.toList()));
 
+			var actualListing = new ArrayList<String>();
+			FuseFillDir filler = (pointer, byteBuffer, pointer1, l) -> {
+				actualListing.add(new String(byteBuffer.array()));
+				return 0;
+			};
+
 			Mockito.when(provider.listExhaustively(PATH))
 					.thenReturn(CompletableFuture.completedFuture(new CloudItemList(ITEM_LISTING)));
 
 			Assertions.assertEquals(0, cloudFs.readdir(PATH.toString(), buf, filler, OFFSET, fi));
-			Assertions.assertIterableEquals(expectedListing, filler.getListing());
+			Assertions.assertIterableEquals(expectedListing, actualListing);
 		}
 
 		@DisplayName("readdir() returns ENOMEM if output buffer is full")
 		@Test
 		public void testFullNativeBufferReturnsENOMEM() {
-			FuseFillDirImpl filler = FuseFillDirImpl.getENOMEMFiller();
-			assert filler.apply(buf, ByteBuffer.wrap(new byte[] {}), buf, OFFSET) != 0;
+			FuseFillDir filler = Mockito.mock(FuseFillDir.class);
+			Mockito.when(filler.apply(Mockito.any(Pointer.class), Mockito.anyString(), Mockito.any(), Mockito.anyLong()))
+					.thenReturn(1);
 
 			Mockito.when(provider.listExhaustively(PATH))
 					.thenReturn(CompletableFuture.completedFuture(new CloudItemList(ITEM_LISTING)));
@@ -183,19 +188,17 @@ public class CloudAccessFSTest {
 		@DisplayName("readdir() returns ENOENT when directory not found")
 		@Test
 		public void testNotFoundReturnsENOENT() {
-			FuseFillDirImpl filler = FuseFillDirImpl.getENOMEMFiller();
-
+			FuseFillDir filler = Mockito.mock(FuseFillDir.class);
 			Mockito.when(provider.listExhaustively(PATH))
 					.thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
 
 			Assertions.assertEquals(-ErrorCodes.ENOENT(), cloudFs.readdir(PATH.toString(), buf, filler, OFFSET, fi));
-
 		}
 
 		@DisplayName("readdir() returns ENOTDIR when resource is not a directory")
 		@Test
 		public void testNotADirectoryReturnsENOTDIR() {
-			FuseFillDirImpl filler = FuseFillDirImpl.getENOMEMFiller();
+			FuseFillDir filler = Mockito.mock(FuseFillDir.class);
 
 			Mockito.when(provider.listExhaustively(PATH))
 					.thenReturn(CompletableFuture.failedFuture(new TypeMismatchException()));
@@ -206,7 +209,7 @@ public class CloudAccessFSTest {
 		@DisplayName("readdir() returns EIO on CloudProviderException ")
 		@Test
 		public void testCloudProviderExceptionReturnsEIO() {
-			FuseFillDirImpl filler = FuseFillDirImpl.getENOMEMFiller();
+			FuseFillDir filler = Mockito.mock(FuseFillDir.class);
 
 			Mockito.when(provider.listExhaustively(PATH))
 					.thenReturn(CompletableFuture.failedFuture(new CloudProviderException()));
@@ -217,7 +220,7 @@ public class CloudAccessFSTest {
 		@DisplayName("readdir() returns EIO on InvalidPageTokenException")
 		@Test
 		public void testInvalidTokenReturnsEIO() {
-			FuseFillDirImpl filler = FuseFillDirImpl.getENOMEMFiller();
+			FuseFillDir filler = Mockito.mock(FuseFillDir.class);
 
 			Mockito.when(provider.listExhaustively(PATH))
 					.thenReturn(CompletableFuture.failedFuture(new InvalidPageTokenException("Message")));
@@ -228,7 +231,7 @@ public class CloudAccessFSTest {
 		@DisplayName("readdir() returns EIO on any other exception")
 		@Test
 		public void testAnyExceptionReturnsEIO() {
-			FuseFillDirImpl filler = FuseFillDirImpl.getENOMEMFiller();
+			FuseFillDir filler = Mockito.mock(FuseFillDir.class);
 
 			Mockito.when(provider.listExhaustively(PATH))
 					.thenReturn(CompletableFuture.failedFuture(new Exception()));
