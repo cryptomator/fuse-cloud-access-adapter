@@ -13,12 +13,16 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 import ru.serce.jnrfuse.ErrorCodes;
 import ru.serce.jnrfuse.FuseFillDir;
 import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 
+import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -26,6 +30,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class CloudAccessFSTest {
 
@@ -89,7 +94,7 @@ public class CloudAccessFSTest {
 			fileStat = new FileStat(RUNTIME);
 		}
 
-		@DisplayName("getAttr() returns 0 on success")
+		@DisplayName("getattr() returns 0 on success")
 		@Test
 		public void testGetAttrSuccess() {
 			Mockito.when(provider.itemMetadata(PATH))
@@ -98,32 +103,25 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(0, cloudFs.getattr(PATH.toString(), fileStat));
 		}
 
-		@DisplayName("getAttr() returns ENOENT when resource is not found.")
+		@DisplayName("getattr() returns ENOENT when resource is not found.")
 		@Test
-		public void testGetAttrNotFound() {
+		public void testGetAttrReturnsENOENTIfNotFound() {
 			Mockito.when(provider.itemMetadata(PATH))
 					.thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
 
 			Assertions.assertEquals(-ErrorCodes.ENOENT(), cloudFs.getattr(PATH.toString(), fileStat));
 		}
 
-		@DisplayName("getAttr() returns EIO on CloudProviderException.")
-		@Test
-		public void testGetAttrCloudError() {
+		@ParameterizedTest(name = "getattr() returns EIO on any other exception (expected or not)")
+		@ValueSource(classes = {CloudProviderException.class, Exception.class})
+		public void testGetAttrReturnsEIOOnException(Class exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
+			Exception e = (Exception) exceptionClass.getDeclaredConstructor().newInstance();
 			Mockito.when(provider.itemMetadata(PATH))
-					.thenReturn(CompletableFuture.failedFuture(new CloudProviderException()));
+					.thenReturn(CompletableFuture.failedFuture(e));
 
 			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.getattr(PATH.toString(), fileStat));
 		}
 
-		@DisplayName("getAttr() returns EIO on any exception.")
-		@Test
-		public void testGetAttrSomeException() {
-			Mockito.when(provider.itemMetadata(PATH))
-					.thenReturn(CompletableFuture.failedFuture(new Exception()));
-
-			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.getattr(PATH.toString(), fileStat));
-		}
 	}
 
 	static class ReadDirTests {
@@ -205,38 +203,25 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.ENOTDIR(), cloudFs.readdir(PATH.toString(), buf, filler, OFFSET, fi));
 		}
 
-		@DisplayName("readdir() returns EIO on CloudProviderException ")
-		@Test
-		public void testCloudProviderExceptionReturnsEIO() {
+		@ParameterizedTest(name = "readdir() returns EIO on any other exception (expected or not)")
+		@MethodSource("provideExceptionsResultingInEIO")
+		public void testAnyExceptionReturnsEIO(Exception e) {
 			FuseFillDir filler = Mockito.mock(FuseFillDir.class);
 
 			Mockito.when(provider.listExhaustively(PATH))
-					.thenReturn(CompletableFuture.failedFuture(new CloudProviderException()));
+					.thenReturn(CompletableFuture.failedFuture(e));
 
 			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.readdir(PATH.toString(), buf, filler, OFFSET, fi));
 		}
 
-		@DisplayName("readdir() returns EIO on InvalidPageTokenException")
-		@Test
-		public void testInvalidTokenReturnsEIO() {
-			FuseFillDir filler = Mockito.mock(FuseFillDir.class);
-
-			Mockito.when(provider.listExhaustively(PATH))
-					.thenReturn(CompletableFuture.failedFuture(new InvalidPageTokenException("Message")));
-
-			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.readdir(PATH.toString(), buf, filler, OFFSET, fi));
+		private static Stream<Exception> provideExceptionsResultingInEIO() {
+			return Stream.of(
+					new CloudProviderException(),
+					new InvalidPageTokenException("Message"),
+					new Exception()
+			);
 		}
 
-		@DisplayName("readdir() returns EIO on any other exception")
-		@Test
-		public void testAnyExceptionReturnsEIO() {
-			FuseFillDir filler = Mockito.mock(FuseFillDir.class);
-
-			Mockito.when(provider.listExhaustively(PATH))
-					.thenReturn(CompletableFuture.failedFuture(new Exception()));
-
-			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.readdir(PATH.toString(), buf, filler, OFFSET, fi));
-		}
 	}
 
 	static class OpenTest {
@@ -277,22 +262,14 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.ENOENT(), cloudFs.open(PATH.toString(), fi));
 		}
 
-		@DisplayName("open() returns EIO if an IO error occured at the provider side")
-		@Test
-		public void testCloudProviderExceptionReturnsEIO() {
+		@ParameterizedTest(name = "open() returns EIO on any other exception (expected or not)")
+		@ValueSource(classes = {CloudProviderException.class, Exception.class})
+		public void testOpenReturnsEIOOnException(Class exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
+			Exception e = (Exception) exceptionClass.getDeclaredConstructor().newInstance();
 			Mockito.when(provider.itemMetadata(PATH))
-					.thenReturn(CompletableFuture.failedFuture(new CloudProviderException()));
+					.thenReturn(CompletableFuture.failedFuture(e));
 			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.open(PATH.toString(), fi));
 		}
-
-		@DisplayName("open() returns generic EIO if any exception is thrown")
-		@Test
-		public void testAnyExceptionReturnsEIO() {
-			Mockito.when(provider.itemMetadata(PATH))
-					.thenReturn(CompletableFuture.failedFuture(new Exception()));
-			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.open(PATH.toString(), fi));
-		}
-
 	}
 
 	static class ReadTest {
@@ -334,23 +311,14 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.ENOENT(), cloudFs.read(PATH.toString(), BUF, SIZE, OFFSET, fi));
 		}
 
-		@DisplayName("read() returns EIO if CloudProviderException occurs")
-		@Test
-		public void testCloudProviderExceptionReturnsEIO() {
+		@ParameterizedTest(name = "read() returns EIO on any other exception (expected or not)")
+		@ValueSource(classes = {CloudProviderException.class, Exception.class})
+		public void testReadReturnsEIOOnAnyException(Class exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
+			Exception e = (Exception) exceptionClass.getDeclaredConstructor().newInstance();
 			Mockito.when(fileFactory.get(Mockito.anyLong()))
 					.thenReturn(Optional.of(FILE));
 			Mockito.when(FILE.read(BUF, OFFSET, SIZE))
-					.thenReturn(CompletableFuture.failedFuture(new CloudProviderException()));
-			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.read(PATH.toString(), BUF, SIZE, OFFSET, fi));
-		}
-
-		@DisplayName("read() returns EIO if any exception occurs")
-		@Test
-		public void testAnyExceptionReturnsEIO() {
-			Mockito.when(fileFactory.get(Mockito.anyLong()))
-					.thenReturn(Optional.of(FILE));
-			Mockito.when(FILE.read(BUF, OFFSET, SIZE))
-					.thenReturn(CompletableFuture.failedFuture(new Exception()));
+					.thenReturn(CompletableFuture.failedFuture(e));
 			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.read(PATH.toString(), BUF, SIZE, OFFSET, fi));
 		}
 
