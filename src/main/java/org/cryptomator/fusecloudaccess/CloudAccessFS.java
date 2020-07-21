@@ -100,7 +100,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			if (cause instanceof NotFoundException){
 				return -ErrorCodes.ENOENT();
 			} else if (cause instanceof TypeMismatchException) {
-				return -ErrorCodes.ENOTDIR(); //TODO: correct?
+				return -ErrorCodes.ENOTDIR();
 			} else if (cause instanceof InvalidPageTokenException) {
 				//TODO: maybe different return code
 				LOG.error("readdir() failed", e);

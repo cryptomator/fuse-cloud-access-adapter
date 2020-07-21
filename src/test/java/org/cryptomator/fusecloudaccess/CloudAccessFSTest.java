@@ -126,7 +126,6 @@ public class CloudAccessFSTest {
 		}
 	}
 
-	//@Nested
 	static class ReadDirTests {
 
 		private static final long OFFSET = 0L;
@@ -298,7 +297,6 @@ public class CloudAccessFSTest {
 
 	static class ReadTest {
 
-		//public int read(String path, Pointer buf, long size, long offset, FuseFileInfo fi)
 		private static final Path PATH = Path.of("some/path/to/resource");
 		private static final OpenFile FILE = Mockito.mock(OpenFile.class);
 		private static final Pointer BUF = Mockito.mock(Pointer.class);
