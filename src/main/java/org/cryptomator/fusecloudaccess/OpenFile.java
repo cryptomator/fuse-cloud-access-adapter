@@ -27,9 +27,9 @@ class OpenFile {
 	/**
 	 * Reads up to {@code size} bytes beginning at {@code offset} into {@code buf}.
 	 *
-	 * @param buf    Buffer
+	 * @param buf Buffer
 	 * @param offset Position of first byte to read
-	 * @param size   Number of bytes to read
+	 * @param size Number of bytes to read
 	 * @return A CompletionStage either containing the actual number of bytes read (can be less than {@code size} if reached EOF)
 	 * or failing with an {@link IOException}
 	 */

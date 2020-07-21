@@ -45,9 +45,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	/**
 	 * Method for async execution.
 	 *
+	 * Only visible for testing.
+	 *
 	 * @param returnCode an integer {@link CompletionStage} to execute
 	 * @return an integer representing one of the FUSE {@link ErrorCodes}
-	 * @apiNote Only visible for testing.
 	 */
 	int returnOrTimeout(CompletionStage<Integer> returnCode) {
 		try {
