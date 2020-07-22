@@ -10,4 +10,6 @@ pom.xml.versionsBackup
 .idea/**/tasks.xml
 .idea/dictionaries
 .idea/**/libraries/
+.idea/jarRepositories.xml
+.idea/encodings.xml
 *.iml
