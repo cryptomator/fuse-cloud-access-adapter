@@ -12,33 +12,32 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-class OpenFileFactory {
+class OpenDirFactory {
 
-	private static final Logger LOG = LoggerFactory.getLogger(OpenFileFactory.class);
+	private static final Logger LOG = LoggerFactory.getLogger(OpenDirFactory.class);
 
-	private final ConcurrentMap<Long, OpenFile> openFiles = new ConcurrentHashMap<>();
+	private final ConcurrentMap<Long, OpenDir> openDirs = new ConcurrentHashMap<>();
 	private final AtomicLong fileHandleGen = new AtomicLong();
 	private final CloudProvider provider;
 
-	public OpenFileFactory(CloudProvider provider) {
+	public OpenDirFactory(CloudProvider provider) {
 		this.provider = provider;
 	}
 
 	/**
-	 * @param path path of the file to open
-	 * @param flags file open options
+	 * @param path  path of the dir to open
 	 * @return file handle used to identify and close open files.
 	 */
-	public long open(Path path, Set<OpenFlags> flags) {
+	public long open(Path path) {
 		long fileHandle = fileHandleGen.getAndIncrement();
-		OpenFile file = new OpenFile(provider, path, flags);
-		openFiles.put(fileHandle, file);
-		LOG.trace("Opening file {} {}", fileHandle, file);
+		OpenDir dir = new OpenDir(provider, path);
+		openDirs.put(fileHandle, dir);
+		LOG.trace("Opening dir {} {}", fileHandle, dir);
 		return fileHandle;
 	}
 
-	public Optional<OpenFile> get(long fileHandle) {
-		return Optional.ofNullable(openFiles.get(fileHandle));
+	public Optional<OpenDir> get(long dirHandle) {
+		return Optional.ofNullable(openDirs.get(dirHandle));
 	}
 
 	/**
@@ -47,11 +46,9 @@ class OpenFileFactory {
 	 * @param fileHandle file handle used to identify
 	 */
 	public void close(long fileHandle) {
-		OpenFile file = openFiles.remove(fileHandle);
-		if (file != null) {
-			LOG.trace("Releasing file {} {}", fileHandle, file);
-		} else {
-			LOG.trace("No open file with handle {} found.", fileHandle);
+		OpenDir dir = openDirs.remove(fileHandle);
+		if (dir != null) {
+			LOG.trace("Releasing dir {} {}", fileHandle, dir);
 		}
 	}
 

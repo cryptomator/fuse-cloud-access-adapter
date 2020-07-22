@@ -2,9 +2,8 @@ package org.cryptomator.fusecloudaccess;
 
 import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
+import org.cryptomator.cloudaccess.api.CloudItemType;
 import org.cryptomator.cloudaccess.api.CloudProvider;
-import org.cryptomator.cloudaccess.api.exceptions.CloudProviderException;
-import org.cryptomator.cloudaccess.api.exceptions.InvalidPageTokenException;
 import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
 import org.cryptomator.cloudaccess.api.exceptions.TypeMismatchException;
 import org.slf4j.Logger;
@@ -30,21 +29,23 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	private final CloudProvider provider;
 	private final int timeoutMillis;
 	private final OpenFileFactory openFileFactory;
+	private final OpenDirFactory openDirFactory;
 
 	public CloudAccessFS(CloudProvider provider, int timeoutMillis) {
-		this(provider,timeoutMillis,new OpenFileFactory(provider));
+		this(provider, timeoutMillis, new OpenFileFactory(provider), new OpenDirFactory(provider));
 	}
 
 	//Visible for testing
-	CloudAccessFS(CloudProvider provider, int timeoutMillis, OpenFileFactory openFileFactory){
+	CloudAccessFS(CloudProvider provider, int timeoutMillis, OpenFileFactory openFileFactory, OpenDirFactory openDirFactory) {
 		this.provider = provider;
 		this.timeoutMillis = timeoutMillis;
 		this.openFileFactory = openFileFactory;
+		this.openDirFactory = openDirFactory;
 	}
 
 	/**
 	 * Method for async execution.
-	 *
+	 * <p>
 	 * Only visible for testing.
 	 *
 	 * @param returnCode an integer {@link CompletionStage} to execute
@@ -82,36 +83,49 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	@Override
-	public int readdir(String path, Pointer buf, FuseFillDir filler, long offset, FuseFileInfo fi) {
-		var returnCode = provider.listExhaustively(Path.of(path)).thenApply(itemList -> {
-			//if these already return "Buffer full" something 's definitively wrong but still
-			if (filler.apply(buf, ".", null, 0) != 0
-					|| filler.apply(buf, "..", null, 0) != 0) {
-				return -ErrorCodes.ENOMEM();
-			}
-
-			for (var item : itemList.getItems()) {
-				if (filler.apply(buf, item.getName(), null, 0) != 0) {
-					return -ErrorCodes.ENOMEM();
-				}
-			}
-			return 0;
-		}).exceptionally(e -> {
-			final var cause = e.getCause();
-			if (cause instanceof NotFoundException){
-				return -ErrorCodes.ENOENT();
-			} else if (cause instanceof TypeMismatchException) {
-				return -ErrorCodes.ENOTDIR();
-			} else if (cause instanceof InvalidPageTokenException) {
-				//TODO: maybe different return code
-				LOG.error("readdir() failed", e);
-				return -ErrorCodes.EIO();
+	public int opendir(String path, FuseFileInfo fi) {
+		var returnCode = provider.itemMetadata(Path.of(path)).thenApply(metadata -> {
+			if (metadata.getItemType() == CloudItemType.FOLDER) {
+				long dirHandle = openDirFactory.open(Path.of(path));
+				fi.fh.set(dirHandle);
+				return 0;
 			} else {
-				LOG.error("readdir() failed", e);
+				return -ErrorCodes.ENOTDIR();
+			}
+		}).exceptionally(e -> {
+			if (e.getCause() instanceof NotFoundException) {
+				return -ErrorCodes.ENOENT();
+			} else {
+				LOG.error("open() failed", e);
 				return -ErrorCodes.EIO();
 			}
 		});
 		return returnOrTimeout(returnCode);
+	}
+
+	@Override
+	public int readdir(String path, Pointer buf, FuseFillDir filler, long offset, FuseFileInfo fi) {
+		if (offset > Integer.MAX_VALUE) {
+			LOG.error("readdir() only supported for up to 2^31 entries, but attempted to read from offset {}", offset);
+			return -ErrorCodes.EOVERFLOW();
+		}
+
+		var openDir = openDirFactory.get(fi.fh.get());
+		if (openDir.isEmpty()) {
+			return -ErrorCodes.EBADF();
+		}
+
+		var returnCode = openDir.get().list(buf, filler, (int) offset).exceptionally(e -> {
+			LOG.error("readdir() failed", e); // TODO distinguish causes
+			return -ErrorCodes.EIO();
+		});
+		return returnOrTimeout(returnCode);
+	}
+
+	@Override
+	public int releasedir(String path, FuseFileInfo fi) {
+		openDirFactory.close(fi.fh.get());
+		return 0;
 	}
 
 	@Override
