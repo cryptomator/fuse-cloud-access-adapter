@@ -9,9 +9,18 @@
 
 	<developers>
 		<developer>
+			<name>Armin Schrenk</name>
+			<email>armin.schrenk@skymatic.de</email>
+			<timezone>+1</timezone>
+			<organization>Skymatic GmbH</organization>
+			<organizationUrl>http://skymatic.de</organizationUrl>
+		</developer>
+		<developer>
 			<name>Sebastian Stenzel</name>
 			<email>sebastian.stenzel@skymatic.de</email>
 			<timezone>+1</timezone>
+			<organization>Skymatic GmbH</organization>
+			<organizationUrl>http://skymatic.de</organizationUrl>
 		</developer>
 	</developers>
 
@@ -42,7 +51,7 @@
 
 		<!-- compile time dependencies -->
 		<jnrfuse.version>0.5.4</jnrfuse.version>
-		<cloudaccess.version>0.1.0-beta2</cloudaccess.version>
+		<cloudaccess.version>0.1.0</cloudaccess.version>
 		<slf4j.version>1.7.28</slf4j.version>
 
 		<!-- test dependencies -->
@@ -136,6 +145,12 @@
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-surefire-plugin</artifactId>
 				<version>2.22.2</version>
+				<configuration>
+					<!-- see https://maven.apache.org/surefire/maven-surefire-plugin/test-mojo.html#excludes -->
+					<excludes>
+						<exclude></exclude>
+					</excludes>
+				</configuration>
 			</plugin>
 		</plugins>
 	</build>

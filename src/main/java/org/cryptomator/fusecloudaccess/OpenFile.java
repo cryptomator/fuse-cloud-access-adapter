@@ -25,11 +25,11 @@ class OpenFile {
 	}
 
 	/**
-	 * Reads up to {@code num} bytes beginning at {@code offset} into {@code buf}
+	 * Reads up to {@code size} bytes beginning at {@code offset} into {@code buf}.
 	 *
-	 * @param buf    Buffer
+	 * @param buf Buffer
 	 * @param offset Position of first byte to read
-	 * @param size   Number of bytes to read
+	 * @param size Number of bytes to read
 	 * @return A CompletionStage either containing the actual number of bytes read (can be less than {@code size} if reached EOF)
 	 * or failing with an {@link IOException}
 	 */
@@ -43,8 +43,9 @@ class OpenFile {
 					if (read == -1) {
 						break;
 					}
-					buf.put(pos - offset, tmp, 0, read);
-					pos += read;
+					int n = (int) Math.min(offset + size - pos, read); //result know to return <= 1024
+					buf.put(pos - offset, tmp, 0, n);
+					pos += n;
 				}
 				int totalRead = (int) (pos - offset);
 				return CompletableFuture.completedFuture(totalRead);

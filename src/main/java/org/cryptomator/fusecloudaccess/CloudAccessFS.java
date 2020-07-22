@@ -3,6 +3,10 @@ package org.cryptomator.fusecloudaccess;
 import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudProvider;
+import org.cryptomator.cloudaccess.api.exceptions.CloudProviderException;
+import org.cryptomator.cloudaccess.api.exceptions.InvalidPageTokenException;
+import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
+import org.cryptomator.cloudaccess.api.exceptions.TypeMismatchException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.serce.jnrfuse.ErrorCodes;
@@ -28,15 +32,21 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	private final OpenFileFactory openFileFactory;
 
 	public CloudAccessFS(CloudProvider provider, int timeoutMillis) {
+		this(provider,timeoutMillis,new OpenFileFactory(provider));
+	}
+
+	//Visible for testing
+	CloudAccessFS(CloudProvider provider, int timeoutMillis, OpenFileFactory openFileFactory){
 		this.provider = provider;
 		this.timeoutMillis = timeoutMillis;
-		this.openFileFactory = new OpenFileFactory(provider);
+		this.openFileFactory = openFileFactory;
 	}
 
 	/**
 	 * Method for async execution.
 	 *
-	 * @apiNote Only visible for testing.
+	 * Only visible for testing.
+	 *
 	 * @param returnCode an integer {@link CompletionStage} to execute
 	 * @return an integer representing one of the FUSE {@link ErrorCodes}
 	 */
@@ -61,7 +71,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			Attributes.copy(metadata, stat);
 			return 0;
 		}).exceptionally(e -> {
-			if (e.getCause() instanceof NoSuchFileException) {
+			if (e.getCause() instanceof NotFoundException) {
 				return -ErrorCodes.ENOENT();
 			} else {
 				LOG.error("getattr() failed", e);
@@ -74,8 +84,12 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	@Override
 	public int readdir(String path, Pointer buf, FuseFillDir filler, long offset, FuseFileInfo fi) {
 		var returnCode = provider.listExhaustively(Path.of(path)).thenApply(itemList -> {
-			filler.apply(buf, ".", null, 0);
-			filler.apply(buf, "..", null, 0);
+			//if these already return "Buffer full" something 's definitively wrong but still
+			if (filler.apply(buf, ".", null, 0) != 0
+					|| filler.apply(buf, "..", null, 0) != 0) {
+				return -ErrorCodes.ENOMEM();
+			}
+
 			for (var item : itemList.getItems()) {
 				if (filler.apply(buf, item.getName(), null, 0) != 0) {
 					return -ErrorCodes.ENOMEM();
@@ -83,8 +97,19 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			}
 			return 0;
 		}).exceptionally(e -> {
-			LOG.error("readdir() failed", e); // TODO distinguish causes
-			return -ErrorCodes.EIO();
+			final var cause = e.getCause();
+			if (cause instanceof NotFoundException){
+				return -ErrorCodes.ENOENT();
+			} else if (cause instanceof TypeMismatchException) {
+				return -ErrorCodes.ENOTDIR();
+			} else if (cause instanceof InvalidPageTokenException) {
+				//TODO: maybe different return code
+				LOG.error("readdir() failed", e);
+				return -ErrorCodes.EIO();
+			} else {
+				LOG.error("readdir() failed", e);
+				return -ErrorCodes.EIO();
+			}
 		});
 		return returnOrTimeout(returnCode);
 	}
@@ -96,7 +121,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			fi.fh.set(fileHandle);
 			return 0;
 		}).exceptionally(e -> {
-			if (e.getCause() instanceof NoSuchFileException) {
+			if (e.getCause() instanceof NotFoundException) {
 				return -ErrorCodes.ENOENT();
 			} else {
 				LOG.error("open() failed", e);
@@ -144,7 +169,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			return -ErrorCodes.EBADF();
 		}
 		var returnCode = openFile.get().read(buf, offset, size).exceptionally(e -> {
-			if (e.getCause() instanceof NoSuchFileException) {
+			if (e instanceof NotFoundException) {
 				return -ErrorCodes.ENOENT();
 			} else {
 				LOG.error("read() failed", e);
