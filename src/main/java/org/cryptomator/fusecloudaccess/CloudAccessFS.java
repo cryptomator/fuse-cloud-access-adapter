@@ -219,25 +219,30 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int rmdir(String path) {
-		//TODO: check for open handles?
-		var returnCode = provider.delete(Path.of(path))
+		return deleteResource(Path.of(path), "rmdir() failed");
+	}
+
+	@Override
+	public int unlink(String path) {
+		return deleteResource(Path.of(path), "unlink() failed");
+	}
+
+	//visible for testing
+	int deleteResource(Path path, String msgOnError) {
+		//TODO: do we need to check for open handles?
+		var returnCode = provider.delete(path)
 				.thenApply(Void -> 0)
 				.exceptionally(completionThrowable -> {
 					final var e = completionThrowable.getCause();
 					if (e instanceof NotFoundException) {
 						return -ErrorCodes.ENOENT();
 					} else {
-						LOG.error("rmdir() failed", e);
+						LOG.error(msgOnError, e);
 						return -ErrorCodes.EIO();
 					}
 				});
 		return returnOrTimeout(returnCode);
 	}
-//
-//	@Override
-//	public int unlink(String path) {
-//		return super.unlink(path);
-//	}
 
 	@Override
 	public int read(String path, Pointer buf, long size, long offset, FuseFileInfo fi) {

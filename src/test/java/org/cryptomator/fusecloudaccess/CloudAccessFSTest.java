@@ -490,43 +490,63 @@ public class CloudAccessFSTest {
 	}
 
 	@Nested
-	class RmdirTest {
+	class DeleteResourceTest {
 
 		private Path path = Path.of("dir/to/desolate");
 
-		@DisplayName("rmdir(...) returns 0 on success")
+		@DisplayName("deleteResource(...) returns 0 on success")
 		@Test
 		public void testOnSuccessReturnsZero() {
 			Mockito.when(provider.delete(path))
 					.thenReturn(CompletableFuture.completedFuture(null));
 
-			var actualResult = cloudFs.rmdir(path.toString());
+			var actualResult = cloudFs.deleteResource(path, "testCall() failed");
 
 			Assertions.assertEquals(0, actualResult);
 		}
 
-		@DisplayName("rmdir(...) returns ENOENT if path not found")
+		@DisplayName("deleteResource(...) returns ENOENT if path not found")
 		@Test
 		public void testNotFoundExceptionReturnsENOENT() {
 			Mockito.when(provider.delete(path))
 					.thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
 
-			var actualResult = cloudFs.rmdir(path.toString());
+			var actualResult = cloudFs.deleteResource(path, "testCall() failed");
 
 			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualResult);
 		}
 
 
-		@ParameterizedTest(name = "rmdir(...) returns EIO on any other exception (expected or not)")
+		@ParameterizedTest(name = "deleteResource(...) returns EIO on any other exception (expected or not)")
 		@ValueSource(classes = {CloudProviderException.class, Exception.class})
 		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
 			Mockito.when(provider.delete(path))
 					.thenReturn(CompletableFuture.failedFuture(e));
 
-			var actualResult = cloudFs.rmdir(path.toString());
+			var actualResult = cloudFs.deleteResource(path, "testCall() failed");
 
 			Assertions.assertEquals(-ErrorCodes.EIO(), actualResult);
+		}
+
+		@Test
+		public void testRmdirCallsDeleteResource() {
+			var mockedCloudFs = Mockito.mock(CloudAccessFS.class);
+			Mockito.doCallRealMethod().when(mockedCloudFs).rmdir(path.toString());
+
+			mockedCloudFs.rmdir(path.toString());
+
+			Mockito.verify(mockedCloudFs).deleteResource(path, "rmdir() failed");
+		}
+
+		@Test
+		public void testUnlinkCallsDeleteResource() {
+			var mockedCloudFs = Mockito.mock(CloudAccessFS.class);
+			Mockito.doCallRealMethod().when(mockedCloudFs).unlink(path.toString());
+
+			mockedCloudFs.unlink(path.toString());
+
+			Mockito.verify(mockedCloudFs).deleteResource(path, "unlink() failed");
 		}
 
 	}
