@@ -489,4 +489,46 @@ public class CloudAccessFSTest {
 		}
 	}
 
+	@Nested
+	class RmdirTest {
+
+		private Path path = Path.of("dir/to/desolate");
+
+		@DisplayName("rmdir(...) returns 0 on success")
+		@Test
+		public void testOnSuccessReturnsZero() {
+			Mockito.when(provider.delete(path))
+					.thenReturn(CompletableFuture.completedFuture(null));
+
+			var actualResult = cloudFs.rmdir(path.toString());
+
+			Assertions.assertEquals(0, actualResult);
+		}
+
+		@DisplayName("rmdir(...) returns ENOENT if path not found")
+		@Test
+		public void testNotFoundExceptionReturnsENOENT() {
+			Mockito.when(provider.delete(path))
+					.thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
+
+			var actualResult = cloudFs.rmdir(path.toString());
+
+			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualResult);
+		}
+
+
+		@ParameterizedTest(name = "rmdir(...) returns EIO on any other exception (expected or not)")
+		@ValueSource(classes = {CloudProviderException.class, Exception.class})
+		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
+			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
+			Mockito.when(provider.delete(path))
+					.thenReturn(CompletableFuture.failedFuture(e));
+
+			var actualResult = cloudFs.rmdir(path.toString());
+
+			Assertions.assertEquals(-ErrorCodes.EIO(), actualResult);
+		}
+
+	}
+
 }

@@ -216,11 +216,23 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 				});
 		return returnOrTimeout(returnCode);
 	}
-//
-//	@Override
-//	public int rmdir(String path) {
-//		return super.rmdir(path);
-//	}
+
+	@Override
+	public int rmdir(String path) {
+		//TODO: check for open handles?
+		var returnCode = provider.delete(Path.of(path))
+				.thenApply(Void -> 0)
+				.exceptionally(completionThrowable -> {
+					final var e = completionThrowable.getCause();
+					if (e instanceof NotFoundException) {
+						return -ErrorCodes.ENOENT();
+					} else {
+						LOG.error("rmdir() failed", e);
+						return -ErrorCodes.EIO();
+					}
+				});
+		return returnOrTimeout(returnCode);
+	}
 //
 //	@Override
 //	public int unlink(String path) {
