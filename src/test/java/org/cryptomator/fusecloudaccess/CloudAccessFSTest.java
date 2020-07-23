@@ -1,13 +1,16 @@
 package org.cryptomator.fusecloudaccess;
 
+import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import jnr.ffi.Runtime;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudItemType;
 import org.cryptomator.cloudaccess.api.CloudProvider;
+import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.cryptomator.cloudaccess.api.exceptions.AlreadyExistsException;
 import org.cryptomator.cloudaccess.api.exceptions.CloudProviderException;
 import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
+import org.cryptomator.cloudaccess.api.exceptions.TypeMismatchException;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +26,7 @@ import ru.serce.jnrfuse.FuseFillDir;
 import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 
+import java.io.InputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Path;
 import java.util.Optional;
@@ -411,6 +415,78 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.EIO(), actualResult);
 		}
 
+	}
+
+	@Nested
+	class CreateTest {
+
+		private Path path = Path.of("file/to/cremate");
+		private FuseFileInfo fi;
+
+		@BeforeEach
+		public void setup() {
+			fi = TestFileInfo.create();
+		}
+
+		@DisplayName("create(...) in not existing case returns 0 on success and opens file")
+		@Test
+		public void testNotExistingCaseReturnsZeroAndOpensFile() {
+			long expectedHandle = 1337;
+			fi.fh.set(0);
+			fi.flags.set(0777);
+			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet())).thenReturn(1337L);
+			var openFlags = BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue());
+			Mockito.when(provider.write(Mockito.any(Path.class), Mockito.anyBoolean(), Mockito.any(InputStream.class), Mockito.any(ProgressListener.class)))
+					.thenReturn(CompletableFuture.completedFuture(CloudItemMetadataProvider.ofPath(path)));
+
+			var actualResult = cloudFs.create(path.toString(), OpenFlags.O_RDWR.longValue(), fi);
+
+			Assertions.assertEquals(0, actualResult);
+			Mockito.verify(fileFactory).open(path, openFlags);
+			Assertions.assertEquals(expectedHandle, fi.fh.longValue());
+		}
+
+		@DisplayName("create(...) in existing case returns 0 and opens file")
+		@Test
+		public void testExistingCaseReturnsZeroAndOpensFile() {
+			long expectedHandle = 1337;
+			fi.fh.set(0);
+			fi.flags.set(0777);
+			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet())).thenReturn(1337L);
+			var openFlags = BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue());
+			Mockito.when(provider.write(Mockito.any(Path.class), Mockito.anyBoolean(), Mockito.any(InputStream.class), Mockito.any(ProgressListener.class)))
+					.thenReturn(CompletableFuture.failedFuture(new AlreadyExistsException(path.toString())));
+
+			var actualResult = cloudFs.create(path.toString(), OpenFlags.O_RDWR.longValue(), fi);
+
+			Assertions.assertEquals(0, actualResult);
+			Mockito.verify(fileFactory).open(path, openFlags);
+			Assertions.assertEquals(expectedHandle, fi.fh.longValue());
+		}
+
+		@DisplayName("create(...) returns ENOENT on NotFoundException")
+		@Test
+		public void testNotFoundExceptionReturnsENOENT() {
+			Mockito.when(provider.write(Mockito.any(Path.class), Mockito.anyBoolean(), Mockito.any(InputStream.class), Mockito.any(ProgressListener.class)))
+					.thenReturn(CompletableFuture.failedFuture(new NotFoundException(path.toString())));
+
+			var actualResult = cloudFs.create(path.toString(), OpenFlags.O_RDWR.longValue(), fi);
+
+			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualResult);
+		}
+
+		@ParameterizedTest(name = "create(...) returns EIO on any other exception (expected or not)")
+		@ValueSource(classes = {TypeMismatchException.class, CloudProviderException.class, Exception.class})
+		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
+			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
+			long mode = OpenFlags.O_RDWR.longValue();
+			Mockito.when(provider.write(Mockito.any(Path.class), Mockito.anyBoolean(), Mockito.any(InputStream.class), Mockito.any(ProgressListener.class)))
+					.thenReturn(CompletableFuture.failedFuture(e));
+
+			var actualResult = cloudFs.create(path.toString(), mode, fi);
+
+			Assertions.assertEquals(-ErrorCodes.EIO(), actualResult);
+		}
 	}
 
 }

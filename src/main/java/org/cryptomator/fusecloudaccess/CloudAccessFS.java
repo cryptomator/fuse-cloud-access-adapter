@@ -4,6 +4,7 @@ import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudItemType;
 import org.cryptomator.cloudaccess.api.CloudProvider;
+import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.cryptomator.cloudaccess.api.exceptions.AlreadyExistsException;
 import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
 import org.slf4j.Logger;
@@ -15,11 +16,13 @@ import ru.serce.jnrfuse.FuseStubFS;
 import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 
+import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 
 public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
@@ -185,11 +188,34 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 				});
 		return returnOrTimeout(returnCode);
 	}
-//
-//	@Override
-//	public int create(String path, long mode, FuseFileInfo fi) {
-//		return super.create(path, mode, fi);
-//	}
+
+	@Override
+	public int create(String rawPath, long mode, FuseFileInfo fi) {
+		Function<Path, Integer> openFunk = p -> {
+			long handle = openFileFactory.open(p, BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()));
+			fi.fh.set(handle);
+			return 0;
+		};
+		final var path = Path.of(rawPath);
+
+		var returnCode = provider.write(path, false, InputStream.nullInputStream(), ProgressListener.NO_PROGRESS_AWARE)
+				.thenApply(itemMetadata -> openFunk.apply(itemMetadata.getPath()))
+				.exceptionally(completionThrowable -> {
+					var e = completionThrowable.getCause();
+					if (e instanceof AlreadyExistsException) {
+						return openFunk.apply(path); //by contract the file is opened if it already exists
+					} else if (e instanceof NotFoundException) {
+						return -ErrorCodes.ENOENT();
+						//TODO: If TypeMismatchException is thrown, the type can be either directory or unknown. Hence, returning EISDIR is not always correct and we cannot find out which type the resource is
+						//} else if (e instanceof TypeMismatchException) {
+						//	return -ErrorCodes.EISDIR();
+					} else {
+						LOG.error("create() failed", e);
+						return -ErrorCodes.EIO();
+					}
+				});
+		return returnOrTimeout(returnCode);
+	}
 //
 //	@Override
 //	public int rmdir(String path) {
