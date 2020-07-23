@@ -372,4 +372,45 @@ public class CloudAccessFSTest {
 		}
 	}
 
+	@Nested
+	class MkdirTest {
+
+		private Path path = Path.of("create/dir/here");
+
+		@DisplayName("mkdir(...) returns zero on success")
+		@Test
+		public void testSuccessReturnsZero() {
+			Mockito.when(provider.createFolder(path))
+					.thenReturn(CompletableFuture.completedFuture(path));
+
+			var actualResult = cloudFs.mkdir(path.toString(), Mockito.anyLong());
+
+			Assertions.assertEquals(0, actualResult);
+		}
+
+		@DisplayName("mkdir(...) returns EEXISTS if target already exists")
+		@Test
+		public void testAlreadyExistsExceptionReturnsEEXISTS() {
+			Mockito.when(provider.createFolder(path))
+					.thenReturn(CompletableFuture.failedFuture(new AlreadyExistsException(path.toString())));
+
+			var actualResult = cloudFs.mkdir(path.toString(), Mockito.anyLong());
+
+			Assertions.assertEquals(-ErrorCodes.EEXIST(), actualResult);
+		}
+
+		@ParameterizedTest(name = "mkdir(...) returns EIO on any other exception (expected or not)")
+		@ValueSource(classes = {CloudProviderException.class, Exception.class})
+		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
+			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
+			Mockito.when(provider.createFolder(path))
+					.thenReturn(CompletableFuture.failedFuture(e));
+
+			var actualResult = cloudFs.mkdir(path.toString(), Mockito.anyLong());
+
+			Assertions.assertEquals(-ErrorCodes.EIO(), actualResult);
+		}
+
+	}
+
 }

@@ -155,7 +155,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		//TODO: do we have to check if one of these things are already opened in this filesystem?
 		//TODO: What should be default if the source already exists?
 		var returnCode = provider.move(Path.of(oldpath), Path.of(newpath), false)
-				.thenApply(p -> 0) //Do we need the path to do anything?
+				.thenApply(p -> 0)
 				.exceptionally(completionThrowable -> {
 					var e = completionThrowable.getCause();
 					if (e instanceof NotFoundException) {
@@ -170,10 +170,21 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		return returnOrTimeout(returnCode);
 	}
 
-//	@Override
-//	public int mkdir(String path, long mode) {
-//		return super.mkdir(path, mode);
-//	}
+	@Override
+	public int mkdir(String path, long mode) {
+		var returnCode = provider.createFolder(Path.of(path))
+				.thenApply(p -> 0)
+				.exceptionally(completionThrowable -> {
+					var e = completionThrowable.getCause();
+					if (e instanceof AlreadyExistsException) {
+						return -ErrorCodes.EEXIST();
+					} else {
+						LOG.error("mkdir() failed", e);
+						return -ErrorCodes.EIO();
+					}
+				});
+		return returnOrTimeout(returnCode);
+	}
 //
 //	@Override
 //	public int create(String path, long mode, FuseFileInfo fi) {
