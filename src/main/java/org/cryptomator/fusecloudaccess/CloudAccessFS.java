@@ -4,8 +4,8 @@ import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudItemType;
 import org.cryptomator.cloudaccess.api.CloudProvider;
+import org.cryptomator.cloudaccess.api.exceptions.AlreadyExistsException;
 import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
-import org.cryptomator.cloudaccess.api.exceptions.TypeMismatchException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.serce.jnrfuse.ErrorCodes;
@@ -15,7 +15,6 @@ import ru.serce.jnrfuse.FuseStubFS;
 import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
@@ -151,11 +150,26 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		return 0;
 	}
 
-//	@Override
-//	public int rename(String oldpath, String newpath) {
-//		return super.rename(oldpath, newpath);
-//	}
-//
+	@Override
+	public int rename(String oldpath, String newpath) {
+		//TODO: do we have to check if one of these things are already opened in this filesystem?
+		//TODO: What should be default if the source already exists?
+		var returnCode = provider.move(Path.of(oldpath), Path.of(newpath), false)
+				.thenApply(p -> 0) //Do we need the path to do anything?
+				.exceptionally(completionThrowable -> {
+					var e = completionThrowable.getCause();
+					if (e instanceof NotFoundException) {
+						return -ErrorCodes.ENOENT();
+					} else if (e instanceof AlreadyExistsException) {
+						return -ErrorCodes.EEXIST();
+					} else {
+						LOG.error("rename() failed", e);
+						return -ErrorCodes.EIO();
+					}
+				});
+		return returnOrTimeout(returnCode);
+	}
+
 //	@Override
 //	public int mkdir(String path, long mode) {
 //		return super.mkdir(path, mode);

@@ -5,6 +5,7 @@ import jnr.ffi.Runtime;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudItemType;
 import org.cryptomator.cloudaccess.api.CloudProvider;
+import org.cryptomator.cloudaccess.api.exceptions.AlreadyExistsException;
 import org.cryptomator.cloudaccess.api.exceptions.CloudProviderException;
 import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
 import org.junit.jupiter.api.Assertions;
@@ -310,6 +311,65 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.EBADF(), result);
 		}
 
+	}
+
+	@Nested
+	class RenameTest {
+
+		private Path oldPath = Path.of("location/number/one");
+		private Path newPath = Path.of("location/number/two");
+
+		@DisplayName("rename(...) returns zero on success")
+		@Test
+		public void testSuccessReturnsZero() {
+			Mockito.when(provider.move(oldPath, newPath, false))
+					.thenReturn(CompletableFuture.completedFuture(newPath));
+			Assertions.assertEquals(0, cloudFs.rename(oldPath.toString(), newPath.toString()));
+		}
+
+		@DisplayName("rename(...) returns ENOENT if cannot be found")
+		@Test
+		public void testNotFoundExceptionReturnsENOENT() {
+			Mockito.when(provider.move(oldPath, newPath, false))
+					.thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
+
+			var actualCode = cloudFs.rename(oldPath.toString(), newPath.toString());
+
+			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualCode);
+		}
+
+		@DisplayName("rename(...) never overwrites existing targets")
+		@Test
+		public void testAlreadyExistingPathsAreNeverReplaced() {
+			Mockito.when(provider.move(Mockito.any(Path.class), Mockito.any(Path.class), Mockito.anyBoolean()))
+					.thenReturn(CompletableFuture.completedFuture(newPath));
+
+			cloudFs.rename(oldPath.toString(), newPath.toString());
+			Mockito.verify(provider, Mockito.never()).move(oldPath, newPath, true);
+		}
+
+		@DisplayName("rename(...) returns EEXIST if target already exists")
+		@Test
+		public void tesAlreadyExistsExceptionReturnsEEXIST() {
+			Mockito.when(provider.move(oldPath, newPath, false))
+					.thenReturn(CompletableFuture.failedFuture(new AlreadyExistsException(newPath.toString())));
+
+			var actualCode = cloudFs.rename(oldPath.toString(), newPath.toString());
+
+			Assertions.assertEquals(-ErrorCodes.EEXIST(), actualCode);
+		}
+
+		@ParameterizedTest(name = "rename() returns EIO on any other exception (expected or not)")
+		@ValueSource(classes = {CloudProviderException.class, Exception.class})
+		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
+			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
+			Mockito.when(provider.move(oldPath, newPath, false))
+					.thenReturn(CompletableFuture.failedFuture(e));
+
+			var actualCode = cloudFs.rename(oldPath.toString(), newPath.toString());
+
+			Assertions.assertEquals(-ErrorCodes.EIO(), actualCode);
+		}
 	}
 
 }
