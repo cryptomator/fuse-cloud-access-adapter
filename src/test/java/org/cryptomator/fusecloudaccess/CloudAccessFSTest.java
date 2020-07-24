@@ -138,17 +138,13 @@ public class CloudAccessFSTest {
 	}
 
 	@Nested
-	class ReadDirTests {
+	class OpenDirTest {
 
-		private Pointer buf;
 		private FuseFileInfo fi;
-		private OpenDir dir;
 
 		@BeforeEach
 		public void setup() {
-			buf = Mockito.mock(Pointer.class);
 			fi = TestFileInfo.create();
-			dir = Mockito.mock(OpenDir.class);
 		}
 
 		@DisplayName("opendir() returns ENOENT when directory not found")
@@ -156,7 +152,7 @@ public class CloudAccessFSTest {
 		public void testNotFoundReturnsENOENT() {
 			Mockito.when(provider.itemMetadata(PATH)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
 
-			var result = cloudFs.open(PATH.toString(), fi);
+			var result = cloudFs.opendir(PATH.toString(), fi);
 
 			Assertions.assertEquals(-ErrorCodes.ENOENT(), result);
 		}
@@ -171,6 +167,22 @@ public class CloudAccessFSTest {
 			var result = cloudFs.opendir(PATH.toString(), fi);
 
 			Assertions.assertEquals(-ErrorCodes.ENOTDIR(), result);
+		}
+
+	}
+
+	@Nested
+	class ReadDirTests {
+
+		private Pointer buf;
+		private FuseFileInfo fi;
+		private OpenDir dir;
+
+		@BeforeEach
+		public void setup() {
+			buf = Mockito.mock(Pointer.class);
+			fi = TestFileInfo.create();
+			dir = Mockito.mock(OpenDir.class);
 		}
 
 		@DisplayName("Successful readdir() returns 0")
