@@ -133,9 +133,16 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	@Override
 	public int open(String path, FuseFileInfo fi) {
 		var returnCode = provider.itemMetadata(Path.of(path)).thenApply(metadata -> {
-			long fileHandle = openFileFactory.open(Path.of(path), BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()));
-			fi.fh.set(fileHandle);
-			return 0;
+			final var type = metadata.getItemType();
+			if (type == CloudItemType.FILE) {
+				long fileHandle = openFileFactory.open(Path.of(path), BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()));
+				fi.fh.set(fileHandle);
+				return 0;
+			} else if (type == CloudItemType.FOLDER) {
+				return -ErrorCodes.EISDIR();
+			} else {
+				return -ErrorCodes.EIO(); //TODO: correct?
+			}
 		}).exceptionally(e -> {
 			if (e.getCause() instanceof NotFoundException) {
 				return -ErrorCodes.ENOENT();

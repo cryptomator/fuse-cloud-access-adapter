@@ -275,14 +275,45 @@ public class CloudAccessFSTest {
 		@DisplayName("open() returns 0 in success and writes the handle to field FileInfo.fh")
 		@Test
 		public void testSuccessfulOpenReturnsZeroAndStoresHandle() {
-			long expectedHandle = 1337;
-			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet())).thenReturn(1337L);
-			Mockito.when(provider.itemMetadata(PATH)).thenReturn(CompletableFuture.completedFuture(CloudItemMetadataProvider.ofPath(PATH)));
+			long expectedHandle = ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE);
+			fi.fh.set(0L);
+
+			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
+			Mockito.when(itemMetadata.getItemType()).thenReturn(CloudItemType.FILE);
+
+			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet())).thenReturn(expectedHandle);
+			Mockito.when(provider.itemMetadata(PATH)).thenReturn(CompletableFuture.completedFuture(itemMetadata));
 
 			var result = cloudFs.open(PATH.toString(), fi);
 
 			Assertions.assertEquals(0, result);
 			Assertions.assertEquals(expectedHandle, fi.fh.get());
+		}
+
+		@DisplayName("open() returns EISDIR if the path points to a directory")
+		@Test
+		public void testFolderItemTypeReturnsEISDIR() {
+			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
+			Mockito.when(itemMetadata.getItemType()).thenReturn(CloudItemType.FOLDER);
+
+			Mockito.when(provider.itemMetadata(PATH)).thenReturn(CompletableFuture.completedFuture(itemMetadata));
+
+			var result = cloudFs.open(PATH.toString(), fi);
+
+			Assertions.assertEquals(-ErrorCodes.EISDIR(), result);
+		}
+
+		@DisplayName("open() returns EIO if the path points to an unknown resource")
+		@Test
+		public void testUnknownItemTypeReturnsEIO() {
+			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
+			Mockito.when(itemMetadata.getItemType()).thenReturn(CloudItemType.UNKNOWN);
+
+			Mockito.when(provider.itemMetadata(PATH)).thenReturn(CompletableFuture.completedFuture(itemMetadata));
+
+			var result = cloudFs.open(PATH.toString(), fi);
+
+			Assertions.assertEquals(-ErrorCodes.EIO(), result);
 		}
 
 		@DisplayName("open() returns ENOENT if the specified path is not found")
