@@ -429,15 +429,13 @@ public class CloudAccessFSTest {
 	@Nested
 	class MkdirTest {
 
-		private Path path = Path.of("create/dir/here");
-
 		@DisplayName("mkdir(...) returns zero on success")
 		@Test
 		public void testSuccessReturnsZero() {
-			Mockito.when(provider.createFolder(path))
-					.thenReturn(CompletableFuture.completedFuture(path));
+			Mockito.when(provider.createFolder(PATH))
+					.thenReturn(CompletableFuture.completedFuture(PATH));
 
-			var actualResult = cloudFs.mkdir(path.toString(), Mockito.anyLong());
+			var actualResult = cloudFs.mkdir(PATH.toString(), Mockito.anyLong());
 
 			Assertions.assertEquals(0, actualResult);
 		}
@@ -445,10 +443,10 @@ public class CloudAccessFSTest {
 		@DisplayName("mkdir(...) returns EEXISTS if target already exists")
 		@Test
 		public void testAlreadyExistsExceptionReturnsEEXISTS() {
-			Mockito.when(provider.createFolder(path))
-					.thenReturn(CompletableFuture.failedFuture(new AlreadyExistsException(path.toString())));
+			Mockito.when(provider.createFolder(PATH))
+					.thenReturn(CompletableFuture.failedFuture(new AlreadyExistsException(PATH.toString())));
 
-			var actualResult = cloudFs.mkdir(path.toString(), Mockito.anyLong());
+			var actualResult = cloudFs.mkdir(PATH.toString(), Mockito.anyLong());
 
 			Assertions.assertEquals(-ErrorCodes.EEXIST(), actualResult);
 		}
@@ -457,10 +455,10 @@ public class CloudAccessFSTest {
 		@ValueSource(classes = {CloudProviderException.class, Exception.class})
 		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
-			Mockito.when(provider.createFolder(path))
+			Mockito.when(provider.createFolder(PATH))
 					.thenReturn(CompletableFuture.failedFuture(e));
 
-			var actualResult = cloudFs.mkdir(path.toString(), Mockito.anyLong());
+			var actualResult = cloudFs.mkdir(PATH.toString(), Mockito.anyLong());
 
 			Assertions.assertEquals(-ErrorCodes.EIO(), actualResult);
 		}
@@ -470,7 +468,6 @@ public class CloudAccessFSTest {
 	@Nested
 	class CreateTest {
 
-		private Path path = Path.of("file/to/cremate");
 		private FuseFileInfo fi;
 
 		@BeforeEach
@@ -487,12 +484,12 @@ public class CloudAccessFSTest {
 			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet())).thenReturn(1337L);
 			var openFlags = BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue());
 			Mockito.when(provider.write(Mockito.any(Path.class), Mockito.anyBoolean(), Mockito.any(InputStream.class), Mockito.any(ProgressListener.class)))
-					.thenReturn(CompletableFuture.completedFuture(CloudItemMetadataProvider.ofPath(path)));
+					.thenReturn(CompletableFuture.completedFuture(CloudItemMetadataProvider.ofPath(PATH)));
 
-			var actualResult = cloudFs.create(path.toString(), OpenFlags.O_RDWR.longValue(), fi);
+			var actualResult = cloudFs.create(PATH.toString(), OpenFlags.O_RDWR.longValue(), fi);
 
 			Assertions.assertEquals(0, actualResult);
-			Mockito.verify(fileFactory).open(path, openFlags);
+			Mockito.verify(fileFactory).open(PATH, openFlags);
 			Assertions.assertEquals(expectedHandle, fi.fh.longValue());
 		}
 
@@ -505,12 +502,12 @@ public class CloudAccessFSTest {
 			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet())).thenReturn(1337L);
 			var openFlags = BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue());
 			Mockito.when(provider.write(Mockito.any(Path.class), Mockito.anyBoolean(), Mockito.any(InputStream.class), Mockito.any(ProgressListener.class)))
-					.thenReturn(CompletableFuture.failedFuture(new AlreadyExistsException(path.toString())));
+					.thenReturn(CompletableFuture.failedFuture(new AlreadyExistsException(PATH.toString())));
 
-			var actualResult = cloudFs.create(path.toString(), OpenFlags.O_RDWR.longValue(), fi);
+			var actualResult = cloudFs.create(PATH.toString(), OpenFlags.O_RDWR.longValue(), fi);
 
 			Assertions.assertEquals(0, actualResult);
-			Mockito.verify(fileFactory).open(path, openFlags);
+			Mockito.verify(fileFactory).open(PATH, openFlags);
 			Assertions.assertEquals(expectedHandle, fi.fh.longValue());
 		}
 
@@ -518,9 +515,9 @@ public class CloudAccessFSTest {
 		@Test
 		public void testNotFoundExceptionReturnsENOENT() {
 			Mockito.when(provider.write(Mockito.any(Path.class), Mockito.anyBoolean(), Mockito.any(InputStream.class), Mockito.any(ProgressListener.class)))
-					.thenReturn(CompletableFuture.failedFuture(new NotFoundException(path.toString())));
+					.thenReturn(CompletableFuture.failedFuture(new NotFoundException(PATH.toString())));
 
-			var actualResult = cloudFs.create(path.toString(), OpenFlags.O_RDWR.longValue(), fi);
+			var actualResult = cloudFs.create(PATH.toString(), OpenFlags.O_RDWR.longValue(), fi);
 
 			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualResult);
 		}
@@ -533,7 +530,7 @@ public class CloudAccessFSTest {
 			Mockito.when(provider.write(Mockito.any(Path.class), Mockito.anyBoolean(), Mockito.any(InputStream.class), Mockito.any(ProgressListener.class)))
 					.thenReturn(CompletableFuture.failedFuture(e));
 
-			var actualResult = cloudFs.create(path.toString(), mode, fi);
+			var actualResult = cloudFs.create(PATH.toString(), mode, fi);
 
 			Assertions.assertEquals(-ErrorCodes.EIO(), actualResult);
 		}
@@ -542,15 +539,13 @@ public class CloudAccessFSTest {
 	@Nested
 	class DeleteResourceTest {
 
-		private Path path = Path.of("dir/to/desolate");
-
 		@DisplayName("deleteResource(...) returns 0 on success")
 		@Test
 		public void testOnSuccessReturnsZero() {
-			Mockito.when(provider.delete(path))
+			Mockito.when(provider.delete(PATH))
 					.thenReturn(CompletableFuture.completedFuture(null));
 
-			var actualResult = cloudFs.deleteResource(path, "testCall() failed");
+			var actualResult = cloudFs.deleteResource(PATH, "testCall() failed");
 
 			Assertions.assertEquals(0, actualResult);
 		}
@@ -558,10 +553,10 @@ public class CloudAccessFSTest {
 		@DisplayName("deleteResource(...) returns ENOENT if path not found")
 		@Test
 		public void testNotFoundExceptionReturnsENOENT() {
-			Mockito.when(provider.delete(path))
+			Mockito.when(provider.delete(PATH))
 					.thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
 
-			var actualResult = cloudFs.deleteResource(path, "testCall() failed");
+			var actualResult = cloudFs.deleteResource(PATH, "testCall() failed");
 
 			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualResult);
 		}
@@ -571,10 +566,10 @@ public class CloudAccessFSTest {
 		@ValueSource(classes = {CloudProviderException.class, Exception.class})
 		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
-			Mockito.when(provider.delete(path))
+			Mockito.when(provider.delete(PATH))
 					.thenReturn(CompletableFuture.failedFuture(e));
 
-			var actualResult = cloudFs.deleteResource(path, "testCall() failed");
+			var actualResult = cloudFs.deleteResource(PATH, "testCall() failed");
 
 			Assertions.assertEquals(-ErrorCodes.EIO(), actualResult);
 		}
@@ -582,21 +577,21 @@ public class CloudAccessFSTest {
 		@Test
 		public void testRmdirCallsDeleteResource() {
 			var mockedCloudFs = Mockito.mock(CloudAccessFS.class);
-			Mockito.doCallRealMethod().when(mockedCloudFs).rmdir(path.toString());
+			Mockito.doCallRealMethod().when(mockedCloudFs).rmdir(PATH.toString());
 
-			mockedCloudFs.rmdir(path.toString());
+			mockedCloudFs.rmdir(PATH.toString());
 
-			Mockito.verify(mockedCloudFs).deleteResource(path, "rmdir() failed");
+			Mockito.verify(mockedCloudFs).deleteResource(PATH, "rmdir() failed");
 		}
 
 		@Test
 		public void testUnlinkCallsDeleteResource() {
 			var mockedCloudFs = Mockito.mock(CloudAccessFS.class);
-			Mockito.doCallRealMethod().when(mockedCloudFs).unlink(path.toString());
+			Mockito.doCallRealMethod().when(mockedCloudFs).unlink(PATH.toString());
 
-			mockedCloudFs.unlink(path.toString());
+			mockedCloudFs.unlink(PATH.toString());
 
-			Mockito.verify(mockedCloudFs).deleteResource(path, "unlink() failed");
+			Mockito.verify(mockedCloudFs).deleteResource(PATH, "unlink() failed");
 		}
 
 	}
