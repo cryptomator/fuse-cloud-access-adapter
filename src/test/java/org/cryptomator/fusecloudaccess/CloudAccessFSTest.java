@@ -31,6 +31,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Path;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class CloudAccessFSTest {
@@ -147,6 +148,23 @@ public class CloudAccessFSTest {
 			fi = TestFileInfo.create();
 		}
 
+		@DisplayName("opendir() returns 0 on success and sets the file handle")
+		@Test
+		public void testSuccessReturnsZeroAndSetsHandle() {
+			long expectedHandle = ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE);
+			fi.fh.set(0L);
+			var itemMetadata = Mockito.mock(CloudItemMetadata.class);
+			Mockito.when(itemMetadata.getItemType()).thenReturn(CloudItemType.FOLDER);
+			Mockito.when(provider.itemMetadata(PATH))
+					.thenReturn(CompletableFuture.completedFuture(itemMetadata));
+			Mockito.when(dirFactory.open(PATH)).thenReturn(expectedHandle);
+
+			var result = cloudFs.opendir(PATH.toString(), fi);
+
+			Assertions.assertEquals(0, result);
+			Assertions.assertEquals(expectedHandle, fi.fh.longValue());
+		}
+
 		@DisplayName("opendir() returns ENOENT when directory not found")
 		@Test
 		public void testNotFoundReturnsENOENT() {
@@ -167,6 +185,17 @@ public class CloudAccessFSTest {
 			var result = cloudFs.opendir(PATH.toString(), fi);
 
 			Assertions.assertEquals(-ErrorCodes.ENOTDIR(), result);
+		}
+
+		@ParameterizedTest(name = "opendir() returns EIO on any other exception (expected or not)")
+		@ValueSource(classes = {CloudProviderException.class, Exception.class})
+		public void testGetAttrReturnsEIOOnException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
+			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
+			Mockito.when(provider.itemMetadata(PATH)).thenReturn(CompletableFuture.failedFuture(e));
+
+			var result = cloudFs.opendir(PATH.toString(), fi);
+
+			Assertions.assertEquals(-ErrorCodes.EIO(), result);
 		}
 
 	}
@@ -196,6 +225,15 @@ public class CloudAccessFSTest {
 
 			Assertions.assertEquals(0, result);
 			Mockito.verify(dir).list(buf, filler, 0);
+		}
+
+		@DisplayName("readdir() returns EOVERFLOW if offset is too large")
+		@Test
+		public void testOffsetExceedingIntegerRangeReturnsEOVERFLOW() {
+			FuseFillDir filler = Mockito.mock(FuseFillDir.class);
+			var result = cloudFs.readdir(PATH.toString(), buf, filler, Long.MAX_VALUE, fi);
+
+			Assertions.assertEquals(-ErrorCodes.EOVERFLOW(), result);
 		}
 
 		@DisplayName("readdir() returns EBADF when directory not opened")
