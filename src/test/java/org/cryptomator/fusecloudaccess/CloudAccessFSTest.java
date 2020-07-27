@@ -108,7 +108,11 @@ public class CloudAccessFSTest {
 		@DisplayName("getattr() returns 0 on success")
 		@Test
 		public void testGetAttrSuccess() {
-			Mockito.when(provider.itemMetadata(PATH)).thenReturn(CompletableFuture.completedFuture(CloudItemMetadataProvider.ofPath(PATH)));
+			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
+			Mockito.when(itemMetadata.getPath()).thenReturn(PATH);
+			Mockito.when(itemMetadata.getItemType()).thenReturn(CloudItemType.FILE);
+			Mockito.when(itemMetadata.getName()).thenReturn(PATH.getFileName().toString());
+			Mockito.when(provider.itemMetadata(PATH)).thenReturn(CompletableFuture.completedFuture(itemMetadata));
 
 			var result = cloudFs.getattr(PATH.toString(), fileStat);
 
@@ -512,10 +516,12 @@ public class CloudAccessFSTest {
 			long expectedHandle = 1337;
 			fi.fh.set(0);
 			fi.flags.set(0777);
+			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
+			Mockito.when(itemMetadata.getPath()).thenReturn(PATH);
 			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet())).thenReturn(1337L);
 			var openFlags = BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue());
 			Mockito.when(provider.write(Mockito.any(Path.class), Mockito.anyBoolean(), Mockito.any(InputStream.class), Mockito.any(ProgressListener.class)))
-					.thenReturn(CompletableFuture.completedFuture(CloudItemMetadataProvider.ofPath(PATH)));
+					.thenReturn(CompletableFuture.completedFuture(itemMetadata));
 
 			var actualResult = cloudFs.create(PATH.toString(), OpenFlags.O_RDWR.longValue(), fi);
 
