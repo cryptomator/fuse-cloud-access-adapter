@@ -268,9 +268,21 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		return returnOrTimeout(returnCode);
 	}
 
-//	@Override
-//	public int write(String path, Pointer buf, long size, long offset, FuseFileInfo fi) {
-//		return super.write(path, buf, size, offset, fi);
-//	}
+	@Override
+	public int write(String path, Pointer buf, long size, long offset, FuseFileInfo fi) {
+		var openFile = openFileFactory.get(fi.fh.get());
+		if (openFile.isEmpty()) {
+			return -ErrorCodes.EBADF();
+		}
+		var returnCode = openFile.get().write(buf, offset, size).exceptionally(e -> {
+			if (e instanceof NotFoundException) {
+				return -ErrorCodes.ENOENT();
+			} else {
+				LOG.error("write() failed", e);
+				return -ErrorCodes.EIO();
+			}
+		});
+		return returnOrTimeout(returnCode);
+	}
 
 }

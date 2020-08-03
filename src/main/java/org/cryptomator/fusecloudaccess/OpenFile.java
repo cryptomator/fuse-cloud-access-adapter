@@ -7,7 +7,11 @@ import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -50,6 +54,32 @@ class OpenFile {
 					pos += n;
 				}
 				int totalRead = (int) (pos - offset);
+				return CompletableFuture.completedFuture(totalRead);
+			} catch (IOException e) {
+				return CompletableFuture.failedFuture(e);
+			}
+		});
+	}
+
+	/**
+	 * Writes up to {@code size} bytes beginning at {@code offset} from {@code buf} to this file.
+	 *
+	 * @param buf Buffer
+	 * @param offset Position of first byte to write
+	 * @param size Number of bytes to write
+	 * @return A CompletionStage either containing the actual number of bytes written or failing with an {@link IOException}
+	 */
+	public CompletionStage<Integer> write(Pointer buf, long offset, long size) {
+		return cachePopulated.thenCompose(cacheFile -> {
+			try (var ch = FileChannel.open(cacheFile, StandardOpenOption.WRITE)) {
+				byte[] tmp = new byte[1024];
+				ch.position(offset);
+				while (ch.position() < offset + size) {
+					int n = (int) Math.min(offset + size - ch.position(), tmp.length); // result know to return <= 1024
+					buf.get(ch.position() - offset, tmp, 0, n);
+					ch.write(ByteBuffer.wrap(tmp, 0, n));
+				}
+				int totalRead = (int) (ch.position() - offset);
 				return CompletableFuture.completedFuture(totalRead);
 			} catch (IOException e) {
 				return CompletableFuture.failedFuture(e);

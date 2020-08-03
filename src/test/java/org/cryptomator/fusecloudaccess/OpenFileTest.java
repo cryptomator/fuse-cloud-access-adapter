@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 
 import java.io.ByteArrayInputStream;
@@ -19,6 +20,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.EnumSet;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -113,7 +115,58 @@ public class OpenFileTest {
 			Assertions.assertTrue(result.isCompletedExceptionally());
 		}
 
+		@DisplayName("test write(...) returns failed stage")
+		@Test
+		public void testWrite() {
+			Pointer buf = Mockito.mock(Pointer.class);
+
+			var futureResult = file.write(buf, 0l, 0l);
+
+			Assertions.assertTrue(futureResult.toCompletableFuture().isCompletedExceptionally());
+		}
+
 	}
 
+	@Nested
+	@DisplayName("opened for writing")
+	public class OpenedForWriting {
+
+		private Path cacheFile;
+		private CompletionStage<Path> cacheReady;
+		private OpenFile file;
+
+		@BeforeEach
+		public void setup(@TempDir Path tmpDir) throws IOException {
+			cacheFile = tmpDir.resolve("cache.file");
+			Files.createFile(cacheFile);
+			cacheReady = CompletableFuture.completedFuture(cacheFile);
+			file = new OpenFile(provider, PATH, EnumSet.of(OpenFlags.O_RDWR), cacheReady);
+		}
+
+		@DisplayName("test write(...) to return correct number of bytes written and write the correct bytes to the cache.")
+		@Test
+		public void testWrite() throws IOException {
+			byte[] bufferContent = new byte[5000];
+			new Random(42l).nextBytes(bufferContent);
+			Pointer buf = Mockito.mock(Pointer.class);
+			Mockito.doAnswer(invocation -> {
+				long off = invocation.getArgument(0);
+				byte[] dst = invocation.getArgument(1);
+				int idx = invocation.getArgument(2);
+				int len = invocation.getArgument(3);
+				System.arraycopy(bufferContent, (int) off, dst, idx, len);
+				return null;
+			}).when(buf).get(Mockito.anyLong(), (byte[]) Mockito.any(), Mockito.anyInt(), Mockito.anyInt());
+
+			var futureResult = file.write(buf, 100l, bufferContent.length);
+			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+
+			Assertions.assertEquals(bufferContent.length, result);
+			byte[] fileContent = Files.readAllBytes(cacheFile);
+			Assertions.assertArrayEquals(new byte[100], Arrays.copyOf(fileContent, 100));
+			Assertions.assertArrayEquals(bufferContent, Arrays.copyOfRange(fileContent, 100, fileContent.length));
+		}
+
+	}
 
 }
