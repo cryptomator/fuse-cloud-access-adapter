@@ -17,11 +17,13 @@ class OpenFile {
 	private final CloudProvider provider;
 	private final Path path;
 	private final Set<OpenFlags> flags;
+	private CompletionStage<Path> cachePopulated;
 
-	public OpenFile(CloudProvider provider, Path path, Set<OpenFlags> flags) {
+	public OpenFile(CloudProvider provider, Path path, Set<OpenFlags> flags, CompletionStage<Path> cachePopulated) {
 		this.provider = provider;
 		this.path = path;
 		this.flags = flags;
+		this.cachePopulated = cachePopulated;
 	}
 
 	/**
