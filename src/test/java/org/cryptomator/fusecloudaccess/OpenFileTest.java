@@ -9,6 +9,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
 import java.io.ByteArrayInputStream;
@@ -162,9 +164,24 @@ public class OpenFileTest {
 			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 			Assertions.assertEquals(bufferContent.length, result);
+			Assertions.assertTrue(file.isDirty());
 			byte[] fileContent = Files.readAllBytes(cacheFile);
 			Assertions.assertArrayEquals(new byte[100], Arrays.copyOf(fileContent, 100));
 			Assertions.assertArrayEquals(bufferContent, Arrays.copyOfRange(fileContent, 100, fileContent.length));
+		}
+
+		@DisplayName("truncate(...) truncates cached contents")
+		@ParameterizedTest(name = "truncate({0})")
+		@ValueSource(longs = {0l, 5l, 13l}) // TODO: truncate to BIGGER than current size
+		public void testTruncate(long expectedSize) throws IOException {
+			Files.write(cacheFile, new byte[13]);
+
+			var futureResult = file.truncate(expectedSize);
+			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+
+			Assertions.assertNull(result);
+			Assertions.assertTrue(file.isDirty());
+			Assertions.assertEquals(expectedSize, Files.size(cacheFile));
 		}
 
 		@DisplayName("flush() writes cached contents to provider")
@@ -180,7 +197,7 @@ public class OpenFileTest {
 			file.setDirty();
 
 			var futureResult = file.flush();
-			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100000), () -> futureResult.toCompletableFuture().get());
+			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 			Assertions.assertNull(result);
 			Assertions.assertArrayEquals(CONTENT, written.get());

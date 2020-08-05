@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -46,9 +47,10 @@ class OpenFileFactory {
 	 */
 	public long open(Path path, Set<OpenFlags> flags) {
 		long fileHandle = fileHandleGen.getAndIncrement();
-		var forWriting = flags.contains(OpenFlags.O_RDWR) || flags.contains(OpenFlags.O_WRONLY);
 		final CompletionStage<Path> cacheFile;
-		if (forWriting) {
+		// TODO handle O_TRUNC, skip download
+		if (flags.contains(OpenFlags.O_RDWR) || flags.contains(OpenFlags.O_WRONLY)) {
+			// download existing file:
 			cacheFile = provider.read(path, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
 				var tmpFile = cacheDir.resolve(TMP_FILE_PREFIX + fileHandle);
 				try (var src = in;
@@ -60,6 +62,7 @@ class OpenFileFactory {
 				}
 			});
 		} else {
+			// don't cache anything:
 			cacheFile = CompletableFuture.failedFuture(new IllegalStateException("Cache file only loaded for write access."));
 		}
 

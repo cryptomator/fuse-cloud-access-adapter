@@ -38,6 +38,16 @@ class OpenFile {
 		this.cachePopulated = cachePopulated;
 	}
 
+	// visible for testing
+	void setDirty() {
+		this.dirty = true;
+	}
+
+	// visible for testing
+	boolean isDirty() {
+		return dirty;
+	}
+
 	/**
 	 * Reads up to {@code size} bytes beginning at {@code offset} into {@code buf}.
 	 *
@@ -78,8 +88,8 @@ class OpenFile {
 	 * @return A CompletionStage either containing the actual number of bytes written or failing with an {@link IOException}
 	 */
 	public CompletionStage<Integer> write(Pointer buf, long offset, long size) {
-		setDirty();
 		return cachePopulated.thenCompose(cacheFile -> {
+			setDirty();
 			try (var ch = FileChannel.open(cacheFile, StandardOpenOption.WRITE)) {
 				byte[] tmp = new byte[1024];
 				ch.position(offset);
@@ -96,11 +106,6 @@ class OpenFile {
 		});
 	}
 
-	// visible for testing
-	void setDirty() {
-		this.dirty = true;
-	}
-
 	/**
 	 * {@link CloudProvider#write(Path, boolean, InputStream, ProgressListener) Writes} any cached data.
 	 * @return A CompletionStage succeeding after all data has been written or failing with an IOException.
@@ -113,6 +118,18 @@ class OpenFile {
 			try {
 				var in = Files.newInputStream(cacheFile, StandardOpenOption.READ);
 				return provider.write(path, true, in, ProgressListener.NO_PROGRESS_AWARE).thenRun(() -> this.closeSilently(in));
+			} catch (IOException e) {
+				return CompletableFuture.failedFuture(e);
+			}
+		});
+	}
+
+	public CompletionStage<Void> truncate(long size) {
+		return cachePopulated.thenCompose(cacheFile -> {
+			setDirty();
+			try (var f = FileChannel.open(cacheFile, StandardOpenOption.WRITE)) {
+				f.truncate(size);
+				return CompletableFuture.completedFuture(null);
 			} catch (IOException e) {
 				return CompletableFuture.failedFuture(e);
 			}

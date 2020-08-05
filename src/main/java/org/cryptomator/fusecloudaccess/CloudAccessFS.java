@@ -16,7 +16,10 @@ import ru.serce.jnrfuse.FuseStubFS;
 import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
@@ -288,4 +291,16 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		return returnOrTimeout(returnCode);
 	}
 
+	@Override
+	public int ftruncate(String path, long size, FuseFileInfo fi) {
+		var openFile = openFileFactory.get(fi.fh.get());
+		if (openFile.isEmpty()) {
+			return -ErrorCodes.EBADF();
+		}
+		var returnCode = openFile.get().truncate(size).thenApply(ignored -> 0).exceptionally(e -> {
+			LOG.error("ftruncate() failed", e);
+			return -ErrorCodes.EIO();
+		});
+		return returnOrTimeout(returnCode);
+	}
 }
