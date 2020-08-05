@@ -156,8 +156,11 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int release(String path, FuseFileInfo fi) {
-		openFileFactory.close(fi.fh.get());
-		return 0;
+		var returnCode = openFileFactory.close(fi.fh.get()).thenApply(ignored -> 0).exceptionally(e -> {
+			LOG.error("release() failed", e);
+			return -ErrorCodes.EIO();
+		});
+		return returnOrTimeout(returnCode);
 	}
 
 	@Override

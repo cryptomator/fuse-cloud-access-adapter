@@ -49,8 +49,8 @@ class OpenFileFactory {
 		var forWriting = flags.contains(OpenFlags.O_RDWR) || flags.contains(OpenFlags.O_WRONLY);
 		final CompletionStage<Path> cacheFile;
 		if (forWriting) {
-			var tmpFile = cacheDir.resolve(TMP_FILE_PREFIX + fileHandle);
-			cacheFile = provider.read(tmpFile, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
+			cacheFile = provider.read(path, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
+				var tmpFile = cacheDir.resolve(TMP_FILE_PREFIX + fileHandle);
 				try (var src = in;
 					 var dst = Files.newOutputStream(tmpFile, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW)) {
 					ByteStreams.copy(src, dst);
@@ -78,12 +78,16 @@ class OpenFileFactory {
 	 *
 	 * @param fileHandle file handle used to identify
 	 */
-	public void close(long fileHandle) {
+	public CompletionStage<Void> close(long fileHandle) {
 		OpenFile file = openFiles.remove(fileHandle);
 		if (file != null) {
-			LOG.trace("Releasing file {} {}", fileHandle, file);
+			LOG.trace("Releasing file {} {}...", fileHandle, file);
+			return file.flush().thenRun(() -> {
+				LOG.debug("Released file {} {}", fileHandle, file);
+			});
 		} else {
 			LOG.trace("No open file with handle {} found.", fileHandle);
+			return CompletableFuture.completedFuture(null);
 		}
 	}
 

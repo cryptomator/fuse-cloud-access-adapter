@@ -21,9 +21,9 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.Random;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class OpenFileTest {
 
@@ -143,7 +143,7 @@ public class OpenFileTest {
 			file = new OpenFile(provider, PATH, EnumSet.of(OpenFlags.O_RDWR), cacheReady);
 		}
 
-		@DisplayName("test write(...) to return correct number of bytes written and write the correct bytes to the cache.")
+		@DisplayName("write(...) returns correct number of bytes written and write the correct bytes to the cache.")
 		@Test
 		public void testWrite() throws IOException {
 			byte[] bufferContent = new byte[5000];
@@ -165,6 +165,25 @@ public class OpenFileTest {
 			byte[] fileContent = Files.readAllBytes(cacheFile);
 			Assertions.assertArrayEquals(new byte[100], Arrays.copyOf(fileContent, 100));
 			Assertions.assertArrayEquals(bufferContent, Arrays.copyOfRange(fileContent, 100, fileContent.length));
+		}
+
+		@DisplayName("flush() writes cached contents to provider")
+		@Test
+		public void testFlush() throws IOException {
+			Files.write(cacheFile, CONTENT);
+			var written = new AtomicReference<byte[]>();
+			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(true), Mockito.any(), Mockito.any())).thenAnswer(invocation -> {
+				InputStream in = invocation.getArgument(2);
+				written.set(in.readAllBytes());
+				return CompletableFuture.completedFuture(null);
+			});
+			file.setDirty();
+
+			var futureResult = file.flush();
+			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100000), () -> futureResult.toCompletableFuture().get());
+
+			Assertions.assertNull(result);
+			Assertions.assertArrayEquals(CONTENT, written.get());
 		}
 
 	}

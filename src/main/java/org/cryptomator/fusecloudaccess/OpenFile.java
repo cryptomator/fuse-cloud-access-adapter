@@ -5,11 +5,16 @@ import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import javax.crypto.Cipher;
+import java.io.Closeable;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.nio.channels.SeekableByteChannel;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Set;
@@ -18,10 +23,13 @@ import java.util.concurrent.CompletionStage;
 
 class OpenFile {
 
+	private static final Logger LOG = LoggerFactory.getLogger(OpenFile.class);
+
 	private final CloudProvider provider;
 	private final Path path;
 	private final Set<OpenFlags> flags;
-	private CompletionStage<Path> cachePopulated;
+	private final CompletionStage<Path> cachePopulated;
+	private boolean dirty;
 
 	public OpenFile(CloudProvider provider, Path path, Set<OpenFlags> flags, CompletionStage<Path> cachePopulated) {
 		this.provider = provider;
@@ -70,6 +78,7 @@ class OpenFile {
 	 * @return A CompletionStage either containing the actual number of bytes written or failing with an {@link IOException}
 	 */
 	public CompletionStage<Integer> write(Pointer buf, long offset, long size) {
+		setDirty();
 		return cachePopulated.thenCompose(cacheFile -> {
 			try (var ch = FileChannel.open(cacheFile, StandardOpenOption.WRITE)) {
 				byte[] tmp = new byte[1024];
@@ -85,6 +94,37 @@ class OpenFile {
 				return CompletableFuture.failedFuture(e);
 			}
 		});
+	}
+
+	// visible for testing
+	void setDirty() {
+		this.dirty = true;
+	}
+
+	/**
+	 * {@link CloudProvider#write(Path, boolean, InputStream, ProgressListener) Writes} any cached data.
+	 * @return A CompletionStage succeeding after all data has been written or failing with an IOException.
+	 */
+	public CompletionStage<Void> flush() {
+		if (!dirty) {
+			return CompletableFuture.completedFuture(null);
+		}
+		return cachePopulated.thenCompose(cacheFile -> {
+			try {
+				var in = Files.newInputStream(cacheFile, StandardOpenOption.READ);
+				return provider.write(path, true, in, ProgressListener.NO_PROGRESS_AWARE).thenRun(() -> this.closeSilently(in));
+			} catch (IOException e) {
+				return CompletableFuture.failedFuture(e);
+			}
+		});
+	}
+
+	private void closeSilently(Closeable closeable) {
+		try {
+			closeable.close();
+		} catch (IOException e) {
+			LOG.warn("Failed to close {}", closeable);
+		}
 	}
 
 	@Override
