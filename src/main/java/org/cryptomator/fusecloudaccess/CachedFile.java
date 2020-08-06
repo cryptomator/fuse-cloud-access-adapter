@@ -1,6 +1,7 @@
 package org.cryptomator.fusecloudaccess;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableRangeSet;
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
 import com.google.common.collect.TreeRangeSet;
@@ -17,7 +18,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.function.BiFunction;
 
-import static java.nio.file.StandardOpenOption.*;
+import static java.nio.file.StandardOpenOption.CREATE_NEW;
+import static java.nio.file.StandardOpenOption.READ;
+import static java.nio.file.StandardOpenOption.SPARSE;
+import static java.nio.file.StandardOpenOption.WRITE;
 
 public class CachedFile implements Closeable {
 
@@ -55,27 +59,35 @@ public class CachedFile implements Closeable {
 		if (populatedRanges.encloses(range)) {
 			return CompletableFuture.completedFuture(fc);
 		} else {
-			return loader.apply(offset, size).thenCompose(in -> {
-				try (var ch = Channels.newChannel(in)) {
-					ByteBuffer buf = ByteBuffer.allocateDirect(1024);
-					long pos = offset;
-					while (pos < offset + size) {
-						int read = ch.read(buf);
-						if (read == -1) {
-							break;
-						}
-						buf.flip();
-						fc.write(buf, pos);
-						pos += read;
-					}
-					var transferredRange = Range.closedOpen(offset, pos);
-					populatedRanges.add(transferredRange);
-					return CompletableFuture.completedFuture(fc);
-				} catch (IOException e) {
-					return CompletableFuture.failedFuture(e);
-				}
-			});
+			var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges);
+			return CompletableFuture.allOf(missingRanges.asRanges().stream().map(this::loadMissing).toArray(CompletableFuture[]::new)).thenApply(ignored -> fc);
 		}
+	}
+
+	private CompletionStage<Void> loadMissing(Range<Long> range) {
+		assert !populatedRanges.intersects(range);
+		long offset = range.lowerEndpoint();
+		long size = range.upperEndpoint() - range.lowerEndpoint();
+		return loader.apply(offset, size).thenCompose(in -> {
+			try (var ch = Channels.newChannel(in)) {
+				ByteBuffer buf = ByteBuffer.allocateDirect(1024);
+				long pos = offset;
+				while (pos < offset + size) {
+					int read = ch.read(buf);
+					if (read == -1) {
+						break;
+					}
+					buf.flip();
+					fc.write(buf, pos);
+					pos += read;
+				}
+				var transferredRange = Range.closedOpen(offset, pos);
+				populatedRanges.add(transferredRange);
+				return CompletableFuture.completedFuture(null);
+			} catch (IOException e) {
+				return CompletableFuture.failedFuture(e);
+			}
+		});
 	}
 
 }

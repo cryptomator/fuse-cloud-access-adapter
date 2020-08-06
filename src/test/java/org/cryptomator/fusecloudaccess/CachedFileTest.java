@@ -67,9 +67,9 @@ public class CachedFileTest {
 	@Order(3)
 	@DisplayName("load region [10, 16] with 0x55")
 	public void testLoad3() {
-		byte[] content = new byte[6];
+		byte[] content = new byte[3];
 		Arrays.fill(content, (byte) 0x55);
-		Mockito.when(loader.apply(10l, 6l)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
+		Mockito.when(loader.apply(12l, 3l)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
 
 		var futureResult = cachedFile.load(10, 6);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
@@ -99,7 +99,7 @@ public class CachedFileTest {
 		Assertions.assertNotNull(result);
 		var baos = new ByteArrayOutputStream();
 		result.transferTo(9, 10, Channels.newChannel(baos));
-		var expected = new byte[] {0x33, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x77, 0x77, 0x77};
+		var expected = new byte[] {0x33, 0x33, 0x33, 0x55, 0x55, 0x55, 0x77, 0x77, 0x77, 0x77};
 		Assertions.assertArrayEquals(expected, baos.toByteArray());
 		Mockito.verify(loader, Mockito.never()).apply(9l, 10l);
 	}
