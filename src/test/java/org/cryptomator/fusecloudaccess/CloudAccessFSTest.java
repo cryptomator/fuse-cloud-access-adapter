@@ -251,7 +251,31 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.EBADF(), result);
 		}
 
-		@ParameterizedTest(name = "readdir() returns EIO on any other exception (expected or not)")
+		@DisplayName("readdir() returns ENOENT when directory not found")
+		@Test
+		public void testNotFoundExceptionReturnsENOENT() {
+			FuseFillDir filler = Mockito.mock(FuseFillDir.class);
+			Mockito.when(dirFactory.get(Mockito.anyLong())).thenReturn(Optional.of(dir));
+			Mockito.when(dir.list(buf, filler, 0)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
+
+			var result = cloudFs.readdir(PATH.toString(), buf, filler, 0l, fi);
+
+			Assertions.assertEquals(-ErrorCodes.ENOENT(), result);
+		}
+
+		@DisplayName("readdir() returns ENOTDIR when resource is not a directory (anymore)")
+		@Test
+		public void testTypeMismatchExceptionReturnsENOENT() {
+			FuseFillDir filler = Mockito.mock(FuseFillDir.class);
+			Mockito.when(dirFactory.get(Mockito.anyLong())).thenReturn(Optional.of(dir));
+			Mockito.when(dir.list(buf, filler, 0)).thenReturn(CompletableFuture.failedFuture(new TypeMismatchException()));
+
+			var result = cloudFs.readdir(PATH.toString(), buf, filler, 0l, fi);
+
+			Assertions.assertEquals(-ErrorCodes.ENOTDIR(), result);
+		}
+
+		@ParameterizedTest(name = "readdir() returns ENOENT on any other exception (expected or not)")
 		@ValueSource(classes = {CloudProviderException.class, RuntimeException.class})
 		public void testAnyExceptionReturnsEIO(Class<Exception> exceptionClass) throws ReflectiveOperationException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();

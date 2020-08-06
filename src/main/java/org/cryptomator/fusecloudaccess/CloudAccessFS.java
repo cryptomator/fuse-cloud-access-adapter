@@ -7,6 +7,7 @@ import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.cryptomator.cloudaccess.api.exceptions.AlreadyExistsException;
 import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
+import org.cryptomator.cloudaccess.api.exceptions.TypeMismatchException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.serce.jnrfuse.ErrorCodes;
@@ -118,8 +119,14 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		}
 
 		var returnCode = openDir.get().list(buf, filler, (int) offset).exceptionally(e -> {
-			LOG.error("readdir() failed", e); // TODO distinguish causes
-			return -ErrorCodes.EIO();
+			if (e instanceof NotFoundException) {
+				return -ErrorCodes.ENOENT();
+			} else if (e instanceof TypeMismatchException) {
+				return -ErrorCodes.ENOTDIR();
+			} else {
+				LOG.error("readdir() failed", e);
+				return -ErrorCodes.EIO();
+			}
 		});
 		return returnOrTimeout(returnCode);
 	}
