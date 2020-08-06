@@ -37,7 +37,7 @@ public class CachedFileTest {
 
 	@Test
 	@Order(1)
-	@DisplayName("load region [8, 12] with 0x33 ")
+	@DisplayName("load region [8, 12] with 0x33")
 	public void testLoad1() {
 		byte[] content = new byte[4];
 		Arrays.fill(content, (byte) 0x33);
@@ -51,7 +51,7 @@ public class CachedFileTest {
 
 	@Test
 	@Order(2)
-	@DisplayName("load region [15, 20] with 0x77 ")
+	@DisplayName("load region [15, 20] with 0x77")
 	public void testLoad2() {
 		byte[] content = new byte[5];
 		Arrays.fill(content, (byte) 0x77);
@@ -65,7 +65,7 @@ public class CachedFileTest {
 
 	@Test
 	@Order(3)
-	@DisplayName("load region [10, 16] with 0x55 ")
+	@DisplayName("load region [10, 16] with 0x55")
 	public void testLoad3() {
 		byte[] content = new byte[6];
 		Arrays.fill(content, (byte) 0x55);
@@ -79,8 +79,20 @@ public class CachedFileTest {
 
 	@Test
 	@Order(4)
+	@DisplayName("load region [999, 1000] which is behind EOF")
+	public void testLoad4() {
+		Mockito.when(loader.apply(999l, 1l)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(new byte[0])));
+
+		var futureResult = cachedFile.load(999, 1);
+		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+
+		Assertions.assertNotNull(result);
+	}
+
+	@Test
+	@Order(5)
 	@DisplayName("load region [9, 19] from cache")
-	public void testLoad4() throws IOException {
+	public void testLoad5() throws IOException {
 		var futureResult = cachedFile.load(9, 10);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
