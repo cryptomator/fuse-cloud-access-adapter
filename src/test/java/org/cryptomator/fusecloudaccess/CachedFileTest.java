@@ -1,107 +1,99 @@
 package org.cryptomator.fusecloudaccess;
 
+import com.google.common.collect.Range;
+import com.google.common.collect.RangeSet;
+import org.cryptomator.cloudaccess.api.CloudProvider;
+import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
-import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.channels.Channels;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import java.util.function.BiFunction;
 
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class CachedFileTest {
 
 	private Path file;
-	private BiFunction<Long, Long, CompletionStage<InputStream>> loader;
+	private CloudProvider provider;
+	private FileChannel fileChannel;
 	private CachedFile cachedFile;
+	private RangeSet<Long> populatedRanges;
 
-	@BeforeAll
-	public void setup(@TempDir Path tmpDir) throws IOException {
-		this.file = tmpDir.resolve("cache.file");
-		this.loader = Mockito.mock(BiFunction.class);
-		this.cachedFile = CachedFile.create(file, loader);
+	@BeforeEach
+	public void setup() throws IOException {
+		this.file = Mockito.mock(Path.class, "/path/to/file");
+		this.provider = Mockito.mock(CloudProvider.class);
+		this.fileChannel = Mockito.mock(FileChannel.class);
+		this.populatedRanges = Mockito.mock(RangeSet.class);
+		this.cachedFile = new CachedFile(file, fileChannel, provider, populatedRanges);
+		Mockito.when(fileChannel.size()).thenReturn(100l);
 	}
 
 	@Test
-	@Order(1)
-	@DisplayName("load region [8, 12] with 0x33")
-	public void testLoad1() {
-		byte[] content = new byte[4];
+	@DisplayName("load region [101, 110] which is behind EOF")
+	public void testEof() {
+		var futureResult = cachedFile.load(101, 9);
+		Assertions.assertTrue(futureResult.toCompletableFuture().isCompletedExceptionally());
+	}
+
+	@Test
+	@DisplayName("load region [50, 60] (miss)")
+	public void testLoadNonExisting() throws IOException {
+		Mockito.when(populatedRanges.encloses(Range.closedOpen(50l, 60l))).thenReturn(false);
+		byte[] content = new byte[10];
 		Arrays.fill(content, (byte) 0x33);
-		Mockito.when(loader.apply(8l, 4l)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
+		Mockito.when(provider.read(file, 50, 10, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
 
-		var futureResult = cachedFile.load(8, 4);
+		var futureResult = cachedFile.load(50, 10);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
-		Assertions.assertNotNull(result);
+		Assertions.assertEquals(result, fileChannel);
+		var buf = ArgumentCaptor.forClass(ByteBuffer.class);
+		Mockito.verify(fileChannel).write(buf.capture(), Mockito.eq(50l));
+		Mockito.verify(populatedRanges).add(Range.closedOpen(50l, 60l));
+		Assertions.assertEquals(ByteBuffer.wrap(content), buf.getValue());
 	}
 
 	@Test
-	@Order(2)
-	@DisplayName("load region [15, 20] with 0x77")
-	public void testLoad2() {
-		byte[] content = new byte[5];
-		Arrays.fill(content, (byte) 0x77);
-		Mockito.when(loader.apply(15l, 5l)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
+	@DisplayName("load region [50, 60] (hit)")
+	public void testLoadCached() {
+		Mockito.when(populatedRanges.encloses(Range.closedOpen(50l, 60l))).thenReturn(true);
 
-		var futureResult = cachedFile.load(15, 5);
+		var futureResult = cachedFile.load(50, 10);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
-		Assertions.assertNotNull(result);
+		Assertions.assertEquals(result, fileChannel);
+		Mockito.verify(provider, Mockito.never()).read(Mockito.any(), Mockito.anyLong(), Mockito.anyLong(), Mockito.any());
 	}
 
 	@Test
-	@Order(3)
-	@DisplayName("load region [10, 16] with 0x55")
-	public void testLoad3() {
-		byte[] content = new byte[3];
+	@DisplayName("load region [50, 70] (partial hit)")
+	public void testLoadPartiallyCached() throws IOException {
+		Mockito.when(populatedRanges.encloses(Range.closedOpen(50l, 70l))).thenReturn(false);
+		Mockito.when(populatedRanges.asRanges()).thenReturn(Set.of(Range.closedOpen(50l, 60l)));
+		byte[] content = new byte[10];
 		Arrays.fill(content, (byte) 0x55);
-		Mockito.when(loader.apply(12l, 3l)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
+		Mockito.when(provider.read(file, 60, 10, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
 
-		var futureResult = cachedFile.load(10, 6);
+
+		var futureResult = cachedFile.load(50, 20);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
-		Assertions.assertNotNull(result);
-	}
-
-	@Test
-	@Order(4)
-	@DisplayName("load region [999, 1000] which is behind EOF")
-	public void testLoad4() {
-		Mockito.when(loader.apply(999l, 1l)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(new byte[0])));
-
-		var futureResult = cachedFile.load(999, 1);
-		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
-
-		Assertions.assertNotNull(result);
-	}
-
-	@Test
-	@Order(5)
-	@DisplayName("load region [9, 19] from cache")
-	public void testLoad5() throws IOException {
-		var futureResult = cachedFile.load(9, 10);
-		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
-
-		Assertions.assertNotNull(result);
-		var baos = new ByteArrayOutputStream();
-		result.transferTo(9, 10, Channels.newChannel(baos));
-		var expected = new byte[] {0x33, 0x33, 0x33, 0x55, 0x55, 0x55, 0x77, 0x77, 0x77, 0x77};
-		Assertions.assertArrayEquals(expected, baos.toByteArray());
-		Mockito.verify(loader, Mockito.never()).apply(9l, 10l);
+		Assertions.assertEquals(result, fileChannel);
+		var buf = ArgumentCaptor.forClass(ByteBuffer.class);
+		Mockito.verify(fileChannel).write(buf.capture(), Mockito.eq(60l));
+		Mockito.verify(populatedRanges).add(Range.closedOpen(60l, 70l));
+		Assertions.assertEquals(ByteBuffer.wrap(content), buf.getValue());
 	}
 
 }

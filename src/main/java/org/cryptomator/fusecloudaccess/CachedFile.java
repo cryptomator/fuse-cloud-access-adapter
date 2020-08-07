@@ -5,18 +5,20 @@ import com.google.common.collect.ImmutableRangeSet;
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
 import com.google.common.collect.TreeRangeSet;
+import org.cryptomator.cloudaccess.api.CloudProvider;
+import org.cryptomator.cloudaccess.api.ProgressListener;
 
 import java.io.Closeable;
+import java.io.EOFException;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.WritableByteChannel;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.function.BiFunction;
 
 import static java.nio.file.StandardOpenOption.CREATE_NEW;
 import static java.nio.file.StandardOpenOption.READ;
@@ -25,18 +27,23 @@ import static java.nio.file.StandardOpenOption.WRITE;
 
 public class CachedFile implements Closeable {
 
-	private final RangeSet<Long> populatedRanges = TreeRangeSet.create();
+	private final Path path;
 	private final FileChannel fc;
-	private final BiFunction<Long, Long, CompletionStage<InputStream>> loader;
+	private final CloudProvider provider;
+	private final RangeSet<Long> populatedRanges;
 
-	private CachedFile(FileChannel fc, BiFunction<Long, Long, CompletionStage<InputStream>> loader) {
+	CachedFile(Path path, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges) {
+		this.path = path;
 		this.fc = fc;
-		this.loader = loader;
+		this.provider = provider;
+		this.populatedRanges = populatedRanges;
 	}
 
-	public static CachedFile create(Path cacheFilePath, BiFunction<Long, Long, CompletionStage<InputStream>> loader) throws IOException {
+	public static CachedFile create(Path path, CloudProvider provider, long initialSize) throws IOException {
+		var cacheFilePath = Files.createTempFile("cache", null);
 		var fc = FileChannel.open(cacheFilePath, READ, WRITE, CREATE_NEW, SPARSE);
-		return new CachedFile(fc, loader);
+		fc.write(ByteBuffer.allocateDirect(1), initialSize - 1); // grow file to initialSize
+		return new CachedFile(path, fc, provider, TreeRangeSet.create());
 	}
 
 	@Override
@@ -48,14 +55,21 @@ public class CachedFile implements Closeable {
 	 * Loads content into the cache file (if necessary) and provides access to the file channel that will then contain
 	 * the requested content, so it can be consumed via {@link FileChannel#transferTo(long, long, WritableByteChannel)}.
 	 *
-	 * @param offset First byte to read (inclusive)
-	 * @param size   Number of bytes to load
-	 * @return A CompletionStage that completes as soon as the requested range is available
+	 * @param offset First byte to read (inclusive), which must not exceed the file's size
+	 * @param count  Number of bytes to load
+	 * @return A CompletionStage that completes as soon as the requested range is available or fails either due to I/O errors or if requesting a range beyond EOF
 	 */
-	public CompletionStage<FileChannel> load(long offset, long size) {
+	public CompletionStage<FileChannel> load(long offset, long count) {
 		Preconditions.checkArgument(offset >= 0);
-		Preconditions.checkArgument(size > 0);
-		var range = Range.closedOpen(offset, offset + size);
+		Preconditions.checkArgument(count > 0);
+		try {
+			if (offset > fc.size()) {
+				throw new EOFException("Requested range beyond EOF");
+			}
+		} catch (IOException e) {
+			return CompletableFuture.failedFuture(e);
+		}
+		var range = Range.closedOpen(offset, offset + count);
 		if (populatedRanges.encloses(range)) {
 			return CompletableFuture.completedFuture(fc);
 		} else {
@@ -68,7 +82,7 @@ public class CachedFile implements Closeable {
 		assert !populatedRanges.intersects(range);
 		long offset = range.lowerEndpoint();
 		long size = range.upperEndpoint() - range.lowerEndpoint();
-		return loader.apply(offset, size).thenCompose(in -> {
+		return provider.read(path, offset, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
 			try (var ch = Channels.newChannel(in)) {
 				ByteBuffer buf = ByteBuffer.allocateDirect(1024);
 				long pos = offset;
