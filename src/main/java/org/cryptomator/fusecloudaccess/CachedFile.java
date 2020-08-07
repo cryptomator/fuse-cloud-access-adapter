@@ -20,10 +20,7 @@ import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
-import static java.nio.file.StandardOpenOption.CREATE_NEW;
-import static java.nio.file.StandardOpenOption.READ;
-import static java.nio.file.StandardOpenOption.SPARSE;
-import static java.nio.file.StandardOpenOption.WRITE;
+import static java.nio.file.StandardOpenOption.*;
 
 public class CachedFile implements Closeable {
 
@@ -39,9 +36,8 @@ public class CachedFile implements Closeable {
 		this.populatedRanges = populatedRanges;
 	}
 
-	public static CachedFile create(Path path, CloudProvider provider, long initialSize) throws IOException {
-		var cacheFilePath = Files.createTempFile("cache", null);
-		var fc = FileChannel.open(cacheFilePath, READ, WRITE, CREATE_NEW, SPARSE);
+	public static CachedFile create(Path path, Path tmpFilePath, CloudProvider provider, long initialSize) throws IOException {
+		var fc = FileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE);
 		fc.write(ByteBuffer.allocateDirect(1), initialSize - 1); // grow file to initialSize
 		return new CachedFile(path, fc, provider, TreeRangeSet.create());
 	}
@@ -91,10 +87,11 @@ public class CachedFile implements Closeable {
 					int read = ch.read(buf);
 					if (read == -1) {
 						break;
+					} else {
+						buf.flip();
+						fc.write(buf, pos);
+						pos += read;
 					}
-					buf.flip();
-					fc.write(buf, pos);
-					pos += read;
 				}
 				var transferredRange = Range.closedOpen(offset, pos);
 				populatedRanges.add(transferredRange);

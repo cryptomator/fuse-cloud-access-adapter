@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
@@ -15,11 +16,13 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 public class CachedFileTest {
 
@@ -37,6 +40,16 @@ public class CachedFileTest {
 		this.populatedRanges = Mockito.mock(RangeSet.class);
 		this.cachedFile = new CachedFile(file, fileChannel, provider, populatedRanges);
 		Mockito.when(fileChannel.size()).thenReturn(100l);
+	}
+
+	@Test
+	@DisplayName("create new cached file")
+	public void testCreate(@TempDir Path tmpDir) throws IOException {
+		Path tmpFile = tmpDir.resolve("cache.file");
+		try (var cachedFile = CachedFile.create(file, tmpFile, provider, 42l)) {
+			Assertions.assertNotNull(cachedFile);
+			Assertions.assertEquals(42l, Files.size(tmpFile));
+		}
 	}
 
 	@Test
@@ -62,6 +75,56 @@ public class CachedFileTest {
 		Mockito.verify(fileChannel).write(buf.capture(), Mockito.eq(50l));
 		Mockito.verify(populatedRanges).add(Range.closedOpen(50l, 60l));
 		Assertions.assertEquals(ByteBuffer.wrap(content), buf.getValue());
+	}
+
+	@Test
+	@DisplayName("load region [50, 60] (miss, hitting remote EOF)")
+	public void testLoadNonExistingReachingEof() throws IOException {
+		Mockito.when(populatedRanges.encloses(Range.closedOpen(50l, 60l))).thenReturn(false);
+		byte[] content = new byte[9];
+		Arrays.fill(content, (byte) 0x33);
+		Mockito.when(provider.read(file, 50, 10, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
+
+		var futureResult = cachedFile.load(50, 10);
+		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+
+		Assertions.assertEquals(result, fileChannel);
+		var buf = ArgumentCaptor.forClass(ByteBuffer.class);
+		Mockito.verify(fileChannel).write(buf.capture(), Mockito.eq(50l));
+		Mockito.verify(populatedRanges).add(Range.closedOpen(50l, 59l));
+		Assertions.assertEquals(ByteBuffer.wrap(content), buf.getValue().asReadOnlyBuffer().position(0).limit(content.length));
+	}
+
+	@Test
+	@DisplayName("load region [50, 60] (fail exceptionally due to failed future)")
+	public void testLoadFailsA() {
+		var e = new IOException("fail.");
+		Mockito.when(provider.read(file, 50, 10, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.failedFuture(e));
+
+		var futureResult = cachedFile.load(50, 10);
+		var ee = Assertions.assertThrows(ExecutionException.class, () -> {
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+		});
+
+		Assertions.assertTrue(futureResult.toCompletableFuture().isCompletedExceptionally());
+		Assertions.assertEquals(e, ee.getCause());
+	}
+
+	@Test
+	@DisplayName("load region [50, 60] (fail exceptionally due to internal I/O error)")
+	public void testLoadFailsB() throws IOException {
+		var e = new IOException("fail.");
+		var content = new byte[10];
+		Mockito.when(provider.read(file, 50, 10, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
+		Mockito.when(fileChannel.write(Mockito.any(), Mockito.anyLong())).thenThrow(e);
+
+		var futureResult = cachedFile.load(50, 10);
+		var ee = Assertions.assertThrows(ExecutionException.class, () -> {
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+		});
+
+		Assertions.assertTrue(futureResult.toCompletableFuture().isCompletedExceptionally());
+		Assertions.assertEquals(e, ee.getCause());
 	}
 
 	@Test
