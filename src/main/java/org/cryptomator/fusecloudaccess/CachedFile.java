@@ -73,6 +73,7 @@ public class CachedFile implements Closeable {
 				ByteBuffer buf = ByteBuffer.allocateDirect(1024);
 				long pos = offset;
 				while (pos < offset + size) {
+					buf.clear();
 					int read = ch.read(buf);
 					if (read == -1) {
 						break;
