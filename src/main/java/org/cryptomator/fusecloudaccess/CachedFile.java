@@ -5,8 +5,11 @@ import com.google.common.collect.ImmutableRangeSet;
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
 import com.google.common.collect.TreeRangeSet;
+import jnr.constants.platform.OpenFlags;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.io.EOFException;
@@ -15,25 +18,38 @@ import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.WritableByteChannel;
-import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicLong;
 
-import static java.nio.file.StandardOpenOption.*;
+import static java.nio.file.StandardOpenOption.CREATE_NEW;
+import static java.nio.file.StandardOpenOption.READ;
+import static java.nio.file.StandardOpenOption.SPARSE;
+import static java.nio.file.StandardOpenOption.WRITE;
 
 public class CachedFile implements Closeable {
+
+	private static final Logger LOG = LoggerFactory.getLogger(CachedFile.class);
 
 	private final Path path;
 	private final FileChannel fc;
 	private final CloudProvider provider;
 	private final RangeSet<Long> populatedRanges;
+	private final AtomicLong fileHandleGen;
+	private final ConcurrentMap<Long, CachedFileHandle> handles;
+	private boolean dirty; // TODO set on each write/truncate
 
 	CachedFile(Path path, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges) {
 		this.path = path;
 		this.fc = fc;
 		this.provider = provider;
 		this.populatedRanges = populatedRanges;
+		this.fileHandleGen = new AtomicLong();
+		this.handles = new ConcurrentHashMap<>();
 	}
 
 	public static CachedFile create(Path path, Path tmpFilePath, CloudProvider provider, long initialSize) throws IOException {
@@ -45,6 +61,30 @@ public class CachedFile implements Closeable {
 	@Override
 	public void close() throws IOException {
 		fc.close();
+	}
+
+	public CachedFileHandle openFileHandle(Set<OpenFlags> flags) {
+		var handleId = fileHandleGen.incrementAndGet();
+		var handle = new CachedFileHandle(this, handleId);
+		handles.put(handleId, handle);
+		return handle;
+	}
+
+	public CompletionStage<Void> releaseFileHandle(long fileHandle) {
+		handles.remove(fileHandle);
+		if (handles.isEmpty()) {
+			try {
+				LOG.debug("uploading {}", path);
+				fc.position(0);
+				return provider.write(path, true, Channels.newInputStream(fc), ProgressListener.NO_PROGRESS_AWARE).thenRun(() -> {
+					LOG.debug("uploaded {}", path);
+				});
+			} catch (IOException e) {
+				return CompletableFuture.failedFuture(e);
+			}
+		} else {
+			return CompletableFuture.completedFuture(null);
+		}
 	}
 
 	/**
