@@ -120,20 +120,8 @@ public class CachedFile implements Closeable {
 		long size = range.upperEndpoint() - range.lowerEndpoint();
 		return provider.read(path, offset, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
 			try (var ch = Channels.newChannel(in)) {
-				ByteBuffer buf = ByteBuffer.allocateDirect(1024);
-				long pos = offset;
-				while (pos < offset + size) {
-					buf.clear();
-					int read = ch.read(buf);
-					if (read == -1) {
-						break;
-					} else {
-						buf.flip();
-						fc.write(buf, pos);
-						pos += read;
-					}
-				}
-				var transferredRange = Range.closedOpen(offset, pos);
+				long transferred = fc.transferFrom(ch, offset, size);
+				var transferredRange = Range.closedOpen(offset, offset + transferred);
 				populatedRanges.add(transferredRange);
 				return CompletableFuture.completedFuture(null);
 			} catch (IOException e) {

@@ -9,12 +9,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -66,15 +64,14 @@ public class CachedFileTest {
 		byte[] content = new byte[10];
 		Arrays.fill(content, (byte) 0x33);
 		Mockito.when(provider.read(file, 50, 10, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
+		Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(50l), Mockito.eq(10l))).thenReturn(10l);
 
 		var futureResult = cachedFile.load(50, 10);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 		Assertions.assertEquals(result, fileChannel);
-		var buf = ArgumentCaptor.forClass(ByteBuffer.class);
-		Mockito.verify(fileChannel).write(buf.capture(), Mockito.eq(50l));
+		Mockito.verify(fileChannel).transferFrom(Mockito.any(), Mockito.eq(50l), Mockito.eq(10l));
 		Mockito.verify(populatedRanges).add(Range.closedOpen(50l, 60l));
-		Assertions.assertEquals(ByteBuffer.wrap(content), buf.getValue());
 	}
 
 	@Test
@@ -84,15 +81,14 @@ public class CachedFileTest {
 		byte[] content = new byte[9];
 		Arrays.fill(content, (byte) 0x33);
 		Mockito.when(provider.read(file, 50, 10, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
+		Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(50l), Mockito.eq(10l))).thenReturn(9l);
 
 		var futureResult = cachedFile.load(50, 10);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 		Assertions.assertEquals(result, fileChannel);
-		var buf = ArgumentCaptor.forClass(ByteBuffer.class);
-		Mockito.verify(fileChannel).write(buf.capture(), Mockito.eq(50l));
+		Mockito.verify(fileChannel).transferFrom(Mockito.any(), Mockito.eq(50l), Mockito.eq(10l));
 		Mockito.verify(populatedRanges).add(Range.closedOpen(50l, 59l));
-		Assertions.assertEquals(ByteBuffer.wrap(content), buf.getValue().asReadOnlyBuffer().position(0).limit(content.length));
 	}
 
 	@Test
@@ -116,7 +112,7 @@ public class CachedFileTest {
 		var e = new IOException("fail.");
 		var content = new byte[10];
 		Mockito.when(provider.read(file, 50, 10, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
-		Mockito.when(fileChannel.write(Mockito.any(), Mockito.anyLong())).thenThrow(e);
+		Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(50l), Mockito.eq(10l))).thenThrow(e);
 
 		var futureResult = cachedFile.load(50, 10);
 		var ee = Assertions.assertThrows(ExecutionException.class, () -> {
@@ -147,16 +143,14 @@ public class CachedFileTest {
 		byte[] content = new byte[10];
 		Arrays.fill(content, (byte) 0x55);
 		Mockito.when(provider.read(file, 60, 10, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
-
+		Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(60l), Mockito.eq(10l))).thenReturn(10l);
 
 		var futureResult = cachedFile.load(50, 20);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 		Assertions.assertEquals(result, fileChannel);
-		var buf = ArgumentCaptor.forClass(ByteBuffer.class);
-		Mockito.verify(fileChannel).write(buf.capture(), Mockito.eq(60l));
+		Mockito.verify(fileChannel).transferFrom(Mockito.any(), Mockito.eq(60l), Mockito.eq(10l));
 		Mockito.verify(populatedRanges).add(Range.closedOpen(60l, 70l));
-		Assertions.assertEquals(ByteBuffer.wrap(content), buf.getValue());
 	}
 
 }
