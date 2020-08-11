@@ -46,6 +46,9 @@ class CachedFileFactory {
 		try {
 			var cachedFile = cachedFiles.computeIfAbsent(path, p -> this.createCachedFile(p, initialSize));
 			var fileHandle = cachedFile.openFileHandle(flags);
+			if (flags.contains(OpenFlags.O_TRUNC)) {
+				cachedFile.truncate(0);
+			}
 			fileHandles.put(fileHandle.getId(), fileHandle);
 			return fileHandle;
 		} catch (UncheckedIOException e) {

@@ -345,11 +345,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		if (handle.isEmpty()) {
 			return -ErrorCodes.EBADF();
 		}
-//		var returnCode = handle.get().truncate(size).thenApply(ignored -> 0).exceptionally(e -> {
-//			LOG.error("ftruncate() failed", e);
-//			return -ErrorCodes.EIO();
-//		});
-//		return returnOrTimeout(returnCode);
-		return -1; // TODO
+		var returnCode = handle.get().truncate(size).thenApply(ignored -> 0).exceptionally(e -> {
+			LOG.error("ftruncate() failed", e);
+			return -ErrorCodes.EIO();
+		});
+		return returnOrTimeout(returnCode);
 	}
 }

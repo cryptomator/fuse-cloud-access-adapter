@@ -9,6 +9,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
 import java.io.ByteArrayInputStream;
@@ -40,13 +42,14 @@ public class CachedFileTest {
 		Mockito.when(fileChannel.size()).thenReturn(100l);
 	}
 
-	@Test
 	@DisplayName("create new cached file")
-	public void testCreate(@TempDir Path tmpDir) throws IOException {
+	@ParameterizedTest(name = "with initial size={0}")
+	@ValueSource(longs = {0l, 1l, 42l})
+	public void testCreate(long size, @TempDir Path tmpDir) throws IOException {
 		Path tmpFile = tmpDir.resolve("cache.file");
-		try (var cachedFile = CachedFile.create(file, tmpFile, provider, 42l)) {
+		try (var cachedFile = CachedFile.create(file, tmpFile, provider, size)) {
 			Assertions.assertNotNull(cachedFile);
-			Assertions.assertEquals(42l, Files.size(tmpFile));
+			Assertions.assertEquals(size, Files.size(tmpFile));
 		}
 	}
 
@@ -124,6 +127,16 @@ public class CachedFileTest {
 	}
 
 	@Test
+	@DisplayName("load region [50, 50] (empty range)")
+	public void testLoadEmptyRange() {
+		var futureResult = cachedFile.load(50, 0);
+		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+
+		Assertions.assertEquals(result, fileChannel);
+		Mockito.verify(provider, Mockito.never()).read(Mockito.any(), Mockito.anyLong(), Mockito.anyLong(), Mockito.any());
+	}
+
+	@Test
 	@DisplayName("load region [50, 60] (hit)")
 	public void testLoadCached() {
 		Mockito.when(populatedRanges.encloses(Range.closedOpen(50l, 60l))).thenReturn(true);
@@ -151,6 +164,14 @@ public class CachedFileTest {
 		Assertions.assertEquals(result, fileChannel);
 		Mockito.verify(fileChannel).transferFrom(Mockito.any(), Mockito.eq(60l), Mockito.eq(10l));
 		Mockito.verify(populatedRanges).add(Range.closedOpen(60l, 70l));
+	}
+
+	@DisplayName("truncate(...)")
+	@ParameterizedTest(name = "truncate({0})")
+	@ValueSource(longs = {0l, 1l, 2l, 3l})
+	public void testTruncate(long size) throws IOException {
+		cachedFile.truncate(size);
+		Mockito.verify(fileChannel).truncate(size);
 	}
 
 }

@@ -54,7 +54,9 @@ public class CachedFile implements Closeable {
 
 	public static CachedFile create(Path path, Path tmpFilePath, CloudProvider provider, long initialSize) throws IOException {
 		var fc = FileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE);
-		fc.write(ByteBuffer.allocateDirect(1), initialSize - 1); // grow file to initialSize
+		if (initialSize > 0) {
+			fc.write(ByteBuffer.allocateDirect(1), initialSize - 1); // grow file to initialSize
+		}
 		return new CachedFile(path, fc, provider, TreeRangeSet.create());
 	}
 
@@ -97,7 +99,7 @@ public class CachedFile implements Closeable {
 	 */
 	public CompletionStage<FileChannel> load(long offset, long count) {
 		Preconditions.checkArgument(offset >= 0);
-		Preconditions.checkArgument(count > 0);
+		Preconditions.checkArgument(count >= 0);
 		try {
 			if (offset > fc.size()) {
 				throw new EOFException("Requested range beyond EOF");
@@ -106,7 +108,7 @@ public class CachedFile implements Closeable {
 			return CompletableFuture.failedFuture(e);
 		}
 		var range = Range.closedOpen(offset, offset + count);
-		if (populatedRanges.encloses(range)) {
+		if (range.isEmpty() || populatedRanges.encloses(range)) {
 			return CompletableFuture.completedFuture(fc);
 		} else {
 			var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges);
@@ -130,4 +132,7 @@ public class CachedFile implements Closeable {
 		});
 	}
 
+	void truncate(long size) throws IOException {
+		fc.truncate(size);
+	}
 }

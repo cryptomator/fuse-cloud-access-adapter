@@ -86,4 +86,13 @@ public class CachedFileHandle {
 	public CompletionStage<Void> release() {
 		return cachedFile.releaseFileHandle(id);
 	}
+
+	CompletionStage<Void> truncate(long size) {
+		try {
+			cachedFile.truncate(size);
+			return CompletableFuture.completedFuture(null);
+		} catch (IOException e) {
+			return CompletableFuture.failedFuture(e);
+		}
+	}
 }
