@@ -24,6 +24,7 @@ import java.util.Arrays;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Consumer;
 
 public class CachedFileTest {
 
@@ -32,6 +33,7 @@ public class CachedFileTest {
 	private FileChannel fileChannel;
 	private CachedFile cachedFile;
 	private RangeSet<Long> populatedRanges;
+	private Consumer<Path> onClose;
 
 	@BeforeEach
 	public void setup() throws IOException {
@@ -39,7 +41,8 @@ public class CachedFileTest {
 		this.provider = Mockito.mock(CloudProvider.class);
 		this.fileChannel = Mockito.mock(FileChannel.class);
 		this.populatedRanges = Mockito.mock(RangeSet.class);
-		this.cachedFile = new CachedFile(file, fileChannel, provider, populatedRanges);
+		this.onClose = Mockito.mock(Consumer.class);
+		this.cachedFile = new CachedFile(file, fileChannel, provider, populatedRanges, onClose);
 		Mockito.when(fileChannel.size()).thenReturn(100l);
 	}
 
@@ -48,7 +51,7 @@ public class CachedFileTest {
 	@ValueSource(longs = {0l, 1l, 42l})
 	public void testCreate(long size, @TempDir Path tmpDir) throws IOException {
 		Path tmpFile = tmpDir.resolve("cache.file");
-		try (var cachedFile = CachedFile.create(file, tmpFile, provider, size)) {
+		try (var cachedFile = CachedFile.create(file, tmpFile, provider, size, onClose)) {
 			Assertions.assertNotNull(cachedFile);
 			Assertions.assertEquals(size, Files.size(tmpFile));
 		}
@@ -177,42 +180,51 @@ public class CachedFileTest {
 
 	@Test
 	@DisplayName("release last open file handle (dirty)")
-	public void testReleaseFileHandleDirty() {
+	public void testReleaseFileHandleDirty() throws IOException {
 		var handle = cachedFile.openFileHandle();
 		cachedFile.markDirty();
 		Assumptions.assumeTrue(cachedFile.isDirty());
 		Mockito.when(provider.write(Mockito.eq(file), Mockito.eq(true), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(null));
+		Mockito.doNothing().when(fileChannel).close();
 
 		var futureResult = cachedFile.releaseFileHandle(handle.getId());
 
 		Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 		Mockito.verify(provider).write(Mockito.eq(file), Mockito.eq(true), Mockito.any(), Mockito.any());
+		Mockito.verify(fileChannel).close();
+		Mockito.verify(onClose).accept(Mockito.eq(file));
 	}
 
 	@Test
 	@DisplayName("release last open file handle (non-dirty)")
-	public void testReleaseFileHandleNonDirty() {
+	public void testReleaseFileHandleNonDirty() throws IOException {
 		var handle = cachedFile.openFileHandle();
 		Assumptions.assumeFalse(cachedFile.isDirty());
+		Mockito.doNothing().when(fileChannel).close();
 
 		var futureResult = cachedFile.releaseFileHandle(handle.getId());
 
 		Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 		Mockito.verify(provider, Mockito.never()).write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.any());
+		Mockito.verify(fileChannel).close();
+		Mockito.verify(onClose).accept(Mockito.eq(file));
 	}
 
 	@Test
 	@DisplayName("release file handle (but not last)")
-	public void testReleaseFileHandleNotLast() {
+	public void testReleaseFileHandleNotLast() throws IOException {
 		var handle1 = cachedFile.openFileHandle();
 		var handle2 = cachedFile.openFileHandle();
 		cachedFile.markDirty();
 		Assumptions.assumeTrue(cachedFile.isDirty());
+		Mockito.doNothing().when(fileChannel).close();
 
 		var futureResult = cachedFile.releaseFileHandle(handle1.getId());
 
 		Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 		Mockito.verify(provider, Mockito.never()).write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.any());
+		Mockito.verify(fileChannel, Mockito.never()).close();
+		Mockito.verify(onClose, Mockito.never()).accept(Mockito.any());
 	}
 
 }

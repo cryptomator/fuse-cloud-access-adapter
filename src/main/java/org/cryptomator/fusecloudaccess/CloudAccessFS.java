@@ -183,10 +183,11 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int rename(String oldpath, String newpath) {
-		//TODO: do we have to check if one of these things are already opened in this filesystem?
-		//TODO: What should be default if the source already exists?
-		var returnCode = provider.move(Path.of(oldpath), Path.of(newpath), false)
-				.thenApply(p -> 0)
+		var returnCode = provider.move(Path.of(oldpath), Path.of(newpath), true)
+				.thenApply(p -> {
+					cachedFileFactory.moved(Path.of(oldpath), Path.of(newpath));
+					return 0;
+				})
 				.exceptionally(completionThrowable -> {
 					var e = completionThrowable.getCause();
 					if (e instanceof NotFoundException) {
@@ -266,11 +267,13 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		return deleteResource(Path.of(path), "unlink() failed");
 	}
 
-	//visible for testing
+	// visible for testing
 	int deleteResource(Path path, String msgOnError) {
-		//TODO: do we need to check for open handles?
 		var returnCode = provider.delete(path)
-				.thenApply(Void -> 0)
+				.thenApply(ignored -> {
+					cachedFileFactory.delete(path);
+					return 0;
+				})
 				.exceptionally(completionThrowable -> {
 					final var e = completionThrowable.getCause();
 					if (e instanceof NotFoundException) {

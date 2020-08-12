@@ -21,7 +21,8 @@ import java.util.concurrent.ConcurrentMap;
 
 class CachedFileFactory {
 
-	// path -> 1 cachedFile -> n fileHandles
+	private static final Logger LOG = LoggerFactory.getLogger(CachedFileFactory.class);
+
 	private final ConcurrentMap<Path, CachedFile> cachedFiles = new ConcurrentHashMap<>();
 	private final Map<Long, CachedFileHandle> fileHandles = new HashMap<>();
 	private final CloudProvider provider;
@@ -59,7 +60,15 @@ class CachedFileFactory {
 	private CachedFile createCachedFile(Path path, long initialSize) {
 		try {
 			var tmpFile = cacheDir.resolve(UUID.randomUUID().toString());
-			return CachedFile.create(path, tmpFile, provider, initialSize);
+			return CachedFile.create(path, tmpFile, provider, initialSize, p -> {
+				try {
+					Files.deleteIfExists(tmpFile);
+				} catch (IOException e) {
+					LOG.warn("Failed to clean up cached data {}", tmpFile);
+				} finally {
+					cachedFiles.remove(p);
+				}
+			});
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}
@@ -83,4 +92,38 @@ class CachedFileFactory {
 		}
 	}
 
+	/**
+	 * Updates existing cached data for <code>newPath</code> (if any) with contents formerly mapped to <code>oldPath</code> and invalidates <code>oldPath</code>.
+	 * <p>
+	 * Cached data previously mapped to <code>newPath</code> will be discarded. No-op if no data cached for either path.
+	 *
+	 * @param oldPath Path to a cached file before it has been moved
+	 * @param newPath New path which is used to access the cached file
+	 */
+	public void moved(Path oldPath, Path newPath) {
+		var cachedFile = cachedFiles.get(oldPath);
+		cachedFiles.compute(newPath, (path, previouslyCachedFile) -> {
+			if (previouslyCachedFile != null) {
+				previouslyCachedFile.markDeleted();
+			}
+			cachedFile.updatePath(newPath);
+			return cachedFile; // removes entry from map if
+		});
+	}
+
+	/**
+	 * Invalidates any mapping for the given <code>path</code>.
+	 * <p>
+	 * Cached data for the given <code>path</code> will be discarded. No-op if no data is cached for the given path.
+	 *
+	 * @param path Path to a cached file
+	 */
+	public void delete(Path path) {
+		cachedFiles.compute(path, (p, cachedFile) -> {
+			if (cachedFile != null) {
+				cachedFile.markDeleted();
+			}
+			return null; // removes entry from map
+		});
+	}
 }

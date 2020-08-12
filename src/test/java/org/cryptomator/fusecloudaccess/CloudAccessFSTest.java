@@ -472,37 +472,28 @@ public class CloudAccessFSTest {
 		@DisplayName("rename(...) returns zero on success")
 		@Test
 		public void testSuccessReturnsZero() {
-			Mockito.when(provider.move(oldPath, newPath, false))
-					.thenReturn(CompletableFuture.completedFuture(newPath));
-			Assertions.assertEquals(0, cloudFs.rename(oldPath.toString(), newPath.toString()));
+			Mockito.when(provider.move(oldPath, newPath, true)).thenReturn(CompletableFuture.completedFuture(newPath));
+
+			var actualCode = cloudFs.rename(oldPath.toString(), newPath.toString());
+
+			Assertions.assertEquals(0, actualCode);
+			Mockito.verify(fileFactory).moved(oldPath, newPath);
 		}
 
 		@DisplayName("rename(...) returns ENOENT if cannot be found")
 		@Test
 		public void testNotFoundExceptionReturnsENOENT() {
-			Mockito.when(provider.move(oldPath, newPath, false))
-					.thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
+			Mockito.when(provider.move(oldPath, newPath, true)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
 
 			var actualCode = cloudFs.rename(oldPath.toString(), newPath.toString());
 
 			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualCode);
 		}
 
-		@DisplayName("rename(...) never overwrites existing targets")
-		@Test
-		public void testAlreadyExistingPathsAreNeverReplaced() {
-			Mockito.when(provider.move(Mockito.any(Path.class), Mockito.any(Path.class), Mockito.anyBoolean()))
-					.thenReturn(CompletableFuture.completedFuture(newPath));
-
-			cloudFs.rename(oldPath.toString(), newPath.toString());
-			Mockito.verify(provider, Mockito.never()).move(oldPath, newPath, true);
-		}
-
 		@DisplayName("rename(...) returns EEXIST if target already exists")
 		@Test
 		public void tesAlreadyExistsExceptionReturnsEEXIST() {
-			Mockito.when(provider.move(oldPath, newPath, false))
-					.thenReturn(CompletableFuture.failedFuture(new AlreadyExistsException(newPath.toString())));
+			Mockito.when(provider.move(oldPath, newPath, true)).thenReturn(CompletableFuture.failedFuture(new AlreadyExistsException(newPath.toString())));
 
 			var actualCode = cloudFs.rename(oldPath.toString(), newPath.toString());
 
@@ -513,8 +504,7 @@ public class CloudAccessFSTest {
 		@ValueSource(classes = {CloudProviderException.class, Exception.class})
 		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
-			Mockito.when(provider.move(oldPath, newPath, false))
-					.thenReturn(CompletableFuture.failedFuture(e));
+			Mockito.when(provider.move(oldPath, newPath, true)).thenReturn(CompletableFuture.failedFuture(e));
 
 			var actualCode = cloudFs.rename(oldPath.toString(), newPath.toString());
 

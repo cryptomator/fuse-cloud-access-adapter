@@ -5,7 +5,6 @@ import com.google.common.collect.ImmutableRangeSet;
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
 import com.google.common.collect.TreeRangeSet;
-import jnr.constants.platform.OpenFlags;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.slf4j.Logger;
@@ -19,12 +18,12 @@ import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.file.Path;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 import static java.nio.file.StandardOpenOption.CREATE_NEW;
 import static java.nio.file.StandardOpenOption.READ;
@@ -34,39 +33,47 @@ import static java.nio.file.StandardOpenOption.WRITE;
 public class CachedFile implements Closeable {
 
 	private static final Logger LOG = LoggerFactory.getLogger(CachedFile.class);
+	private static final AtomicLong FILE_HANDLE_GEN = new AtomicLong();
 
-	private final Path path;
 	private final FileChannel fc;
 	private final CloudProvider provider;
 	private final RangeSet<Long> populatedRanges;
-	private final AtomicLong fileHandleGen;
+	private final Consumer<Path> onClose;
 	private final ConcurrentMap<Long, CachedFileHandle> handles;
+	private Path path;
 	private boolean dirty;
+	private boolean deleted;
 
-	CachedFile(Path path, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges) {
-		this.path = path;
+	CachedFile(Path path, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Consumer<Path> onClose) {
 		this.fc = fc;
 		this.provider = provider;
 		this.populatedRanges = populatedRanges;
-		this.fileHandleGen = new AtomicLong();
+		this.onClose = onClose;
 		this.handles = new ConcurrentHashMap<>();
+		this.path = path;
 	}
 
-	public static CachedFile create(Path path, Path tmpFilePath, CloudProvider provider, long initialSize) throws IOException {
+	public static CachedFile create(Path path, Path tmpFilePath, CloudProvider provider, long initialSize, Consumer<Path> onClose) throws IOException {
 		var fc = FileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE);
 		if (initialSize > 0) {
 			fc.write(ByteBuffer.allocateDirect(1), initialSize - 1); // grow file to initialSize
 		}
-		return new CachedFile(path, fc, provider, TreeRangeSet.create());
+		return new CachedFile(path, fc, provider, TreeRangeSet.create(), onClose);
 	}
 
 	@Override
-	public void close() throws IOException {
-		fc.close();
+	public void close() {
+		try {
+			fc.close();
+		} catch (IOException e) {
+			LOG.error("Failed to close tmp file channel.", e);
+		} finally {
+			onClose.accept(path);
+		}
 	}
 
 	public CachedFileHandle openFileHandle() {
-		var handleId = fileHandleGen.incrementAndGet();
+		var handleId = FILE_HANDLE_GEN.incrementAndGet();
 		var handle = new CachedFileHandle(this, handleId);
 		handles.put(handleId, handle);
 		return handle;
@@ -74,13 +81,19 @@ public class CachedFile implements Closeable {
 
 	public CompletionStage<Void> releaseFileHandle(long fileHandle) {
 		handles.remove(fileHandle);
-		if (handles.isEmpty() && dirty) {
+		if (handles.isEmpty()) {
+			if (deleted || !dirty) {
+				close();
+				return CompletableFuture.completedFuture(null);
+			}
 			try {
-				LOG.debug("uploading {}", path);
+				assert dirty && !deleted;
+				LOG.debug("uploading {}...", path);
 				fc.position(0);
 				// TODO Performance: schedule upload on background task, return immediately, save file contents in "lost+found" dir on error
 				return provider.write(path, true, Channels.newInputStream(fc), ProgressListener.NO_PROGRESS_AWARE).thenRun(() -> {
 					LOG.debug("uploaded {}", path);
+					close();
 				});
 			} catch (IOException e) {
 				return CompletableFuture.failedFuture(e);
@@ -144,5 +157,16 @@ public class CachedFile implements Closeable {
 
 	boolean isDirty() {
 		return dirty;
+	}
+
+	/**
+	 * Prevents the cached data from being persisted on {@link #releaseFileHandle(long)}.
+	 */
+	void markDeleted() {
+		this.deleted = true;
+	}
+
+	void updatePath(Path newPath) {
+		this.path = newPath;
 	}
 }
