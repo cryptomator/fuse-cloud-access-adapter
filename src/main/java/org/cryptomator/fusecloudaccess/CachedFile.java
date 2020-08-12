@@ -141,4 +141,8 @@ public class CachedFile implements Closeable {
 	void markDirty() {
 		this.dirty = true;
 	}
+
+	boolean isDirty() {
+		return dirty;
+	}
 }

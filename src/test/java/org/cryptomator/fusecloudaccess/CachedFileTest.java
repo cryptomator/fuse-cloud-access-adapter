@@ -5,6 +5,7 @@ import com.google.common.collect.RangeSet;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -179,6 +180,7 @@ public class CachedFileTest {
 	public void testReleaseFileHandleDirty() {
 		var handle = cachedFile.openFileHandle();
 		cachedFile.markDirty();
+		Assumptions.assumeTrue(cachedFile.isDirty());
 		Mockito.when(provider.write(Mockito.eq(file), Mockito.eq(true), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(null));
 
 		var futureResult = cachedFile.releaseFileHandle(handle.getId());
@@ -191,6 +193,7 @@ public class CachedFileTest {
 	@DisplayName("release last open file handle (non-dirty)")
 	public void testReleaseFileHandleNonDirty() {
 		var handle = cachedFile.openFileHandle();
+		Assumptions.assumeFalse(cachedFile.isDirty());
 
 		var futureResult = cachedFile.releaseFileHandle(handle.getId());
 
@@ -204,6 +207,7 @@ public class CachedFileTest {
 		var handle1 = cachedFile.openFileHandle();
 		var handle2 = cachedFile.openFileHandle();
 		cachedFile.markDirty();
+		Assumptions.assumeTrue(cachedFile.isDirty());
 
 		var futureResult = cachedFile.releaseFileHandle(handle1.getId());
 

@@ -11,8 +11,10 @@ import org.mockito.Mockito;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 public class CachedFileFactoryTest {
 
@@ -38,15 +40,24 @@ public class CachedFileFactoryTest {
 
 	@Test
 	@DisplayName("closing removes file handle")
-	public void testClosingReleasesHandle() throws IOException {
+	public void testClosingReleasesHandle() throws IOException, ExecutionException, InterruptedException {
 		var handle = cachedFileFactory.open(PATH, OPEN_FLAGS, 42l);
 		Assumptions.assumeTrue(cachedFileFactory.get(handle.getId()).isPresent());
-		Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(true), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(null));
 
-		cachedFileFactory.close(handle.getId());
-		Mockito.verify(provider).write(Mockito.eq(PATH), Mockito.eq(true), Mockito.any(), Mockito.any());
+		var futureResult = cachedFileFactory.close(handle.getId());
 
+		Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 		Assertions.assertFalse(cachedFileFactory.get(handle.getId()).isPresent());
+	}
+
+	@Test
+	@DisplayName("closing invalid handle is no-op")
+	public void testClosingNonExisting() throws IOException {
+		Assumptions.assumeFalse(cachedFileFactory.get(1337l).isPresent());
+
+		var futureResult = cachedFileFactory.close(1337l);
+
+		Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 	}
 
 	@Test
@@ -56,26 +67,6 @@ public class CachedFileFactoryTest {
 		var handle2 = cachedFileFactory.open(PATH, OPEN_FLAGS, 42l);
 
 		Assertions.assertNotEquals(handle1, handle2);
-	}
-
-	@Test
-	@DisplayName("closing the last remaining handle writes cached contents")
-	public void testClosingLastRemainingHandleFlushesCachedContents() throws IOException {
-		var handle1 = cachedFileFactory.open(PATH, OPEN_FLAGS, 42l);
-		var handle2 = cachedFileFactory.open(PATH, OPEN_FLAGS, 42l);
-		Assumptions.assumeTrue(cachedFileFactory.get(handle1.getId()).isPresent());
-		Assumptions.assumeTrue(cachedFileFactory.get(handle2.getId()).isPresent());
-		Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(true), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(null));
-
-		cachedFileFactory.close(handle1.getId());
-		Assertions.assertFalse(cachedFileFactory.get(handle1.getId()).isPresent());
-		Assertions.assertTrue(cachedFileFactory.get(handle2.getId()).isPresent());
-		Mockito.verify(provider, Mockito.never()).write(Mockito.eq(PATH), Mockito.anyBoolean(), Mockito.any(), Mockito.any());
-
-		cachedFileFactory.close(handle2.getId());
-		Assertions.assertFalse(cachedFileFactory.get(handle1.getId()).isPresent());
-		Assertions.assertFalse(cachedFileFactory.get(handle2.getId()).isPresent());
-		Mockito.verify(provider).write(Mockito.eq(PATH), Mockito.anyBoolean(), Mockito.any(), Mockito.any());
 	}
 
 }
