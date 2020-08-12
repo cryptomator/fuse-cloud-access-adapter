@@ -45,7 +45,7 @@ class CachedFileFactory {
 	public CachedFileHandle open(Path path, Set<OpenFlags> flags, long initialSize) throws IOException {
 		try {
 			var cachedFile = cachedFiles.computeIfAbsent(path, p -> this.createCachedFile(p, initialSize));
-			var fileHandle = cachedFile.openFileHandle(flags);
+			var fileHandle = cachedFile.openFileHandle();
 			if (flags.contains(OpenFlags.O_TRUNC)) {
 				cachedFile.truncate(0);
 			}
@@ -75,7 +75,7 @@ class CachedFileFactory {
 	 * @param handleId file handle used to identify
 	 */
 	public CompletionStage<Void> close(long handleId) {
-		CachedFileHandle handle = fileHandles.remove(handleId);
+		CachedFileHandle handle = fileHandles.remove(handleId); // TODO Performance: schedule removal, but keep cached for a few seconds
 		if (handle != null) {
 			return handle.release();
 		} else {

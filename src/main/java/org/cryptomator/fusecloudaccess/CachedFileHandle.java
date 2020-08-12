@@ -41,8 +41,9 @@ public class CachedFileHandle {
 				while (pos < offset + size) {
 					int n = (int) Math.min(BUFFER_SIZE, size - (pos - offset)); // int-cast: n <= BUFFER_SIZE
 					var out = new ByteArrayOutputStream();
-					int transferred = (int) fc.transferTo(pos, n, Channels.newChannel(out)); // int-cast: transferred <= n
-					buf.put(pos - offset, out.toByteArray(), 0, transferred);
+					long transferred = fc.transferTo(pos, n, Channels.newChannel(out));
+					assert transferred == out.size();
+					buf.put(pos - offset, out.toByteArray(), 0, out.size());
 					pos += transferred;
 					if (transferred < n) {
 						break; // EOF
@@ -65,11 +66,12 @@ public class CachedFileHandle {
 	 * @return A CompletionStage either containing the actual number of bytes written or failing with an {@link IOException}
 	 */
 	public CompletionStage<Integer> write(Pointer buf, long offset, long size) {
+		cachedFile.markDirty();
 		return cachedFile.load(0, Long.MAX_VALUE).thenCompose(fc -> {
 			try {
 				long pos = offset;
 				while (pos < offset + size) {
-					int n = (int) Math.min(BUFFER_SIZE, size - (pos - offset));
+					int n = (int) Math.min(BUFFER_SIZE, size - (pos - offset)); // int-cast: n <= BUFFER_SIZE
 					byte[] tmp = new byte[n];
 					buf.get(pos - offset, tmp, 0, n);
 					var in = new ByteArrayInputStream(tmp);

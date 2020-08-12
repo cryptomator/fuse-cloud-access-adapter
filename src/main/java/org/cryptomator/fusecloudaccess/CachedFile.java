@@ -41,7 +41,7 @@ public class CachedFile implements Closeable {
 	private final RangeSet<Long> populatedRanges;
 	private final AtomicLong fileHandleGen;
 	private final ConcurrentMap<Long, CachedFileHandle> handles;
-	private boolean dirty; // TODO set on each write/truncate
+	private boolean dirty;
 
 	CachedFile(Path path, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges) {
 		this.path = path;
@@ -65,7 +65,7 @@ public class CachedFile implements Closeable {
 		fc.close();
 	}
 
-	public CachedFileHandle openFileHandle(Set<OpenFlags> flags) {
+	public CachedFileHandle openFileHandle() {
 		var handleId = fileHandleGen.incrementAndGet();
 		var handle = new CachedFileHandle(this, handleId);
 		handles.put(handleId, handle);
@@ -74,10 +74,11 @@ public class CachedFile implements Closeable {
 
 	public CompletionStage<Void> releaseFileHandle(long fileHandle) {
 		handles.remove(fileHandle);
-		if (handles.isEmpty()) {
+		if (handles.isEmpty() && dirty) {
 			try {
 				LOG.debug("uploading {}", path);
 				fc.position(0);
+				// TODO Performance: schedule upload on background task, return immediately, save file contents in "lost+found" dir on error
 				return provider.write(path, true, Channels.newInputStream(fc), ProgressListener.NO_PROGRESS_AWARE).thenRun(() -> {
 					LOG.debug("uploaded {}", path);
 				});
@@ -134,5 +135,10 @@ public class CachedFile implements Closeable {
 
 	void truncate(long size) throws IOException {
 		fc.truncate(size);
+		markDirty();
+	}
+
+	void markDirty() {
+		this.dirty = true;
 	}
 }
