@@ -286,7 +286,7 @@ public class CloudAccessFSTest {
 			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
 			Mockito.when(itemMetadata.getItemType()).thenReturn(CloudItemType.FILE);
 			Mockito.when(handle.getId()).thenReturn(42l);
-			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet(), Mockito.anyLong())).thenReturn(handle);
+			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(handle);
 			Mockito.when(provider.itemMetadata(PATH)).thenReturn(CompletableFuture.completedFuture(itemMetadata));
 
 			var result = cloudFs.open(PATH.toString(), fi);
@@ -573,13 +573,13 @@ public class CloudAccessFSTest {
 			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
 			Mockito.when(handle.getId()).thenReturn(1337l);
 			Mockito.when(itemMetadata.getPath()).thenReturn(PATH);
-			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet(), Mockito.anyLong())).thenReturn(handle);
+			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(handle);
 			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(itemMetadata));
 
 			var actualResult = cloudFs.create(PATH.toString(), mode, fi);
 
 			Assertions.assertEquals(0, actualResult);
-			Mockito.verify(fileFactory).open(Mockito.eq(PATH), Mockito.any(), Mockito.eq(0l));
+			Mockito.verify(fileFactory).open(Mockito.eq(PATH), Mockito.any(), Mockito.eq(0l), Mockito.any());
 			Assertions.assertEquals(handle.getId(), fi.fh.longValue());
 		}
 
@@ -593,14 +593,14 @@ public class CloudAccessFSTest {
 			Mockito.when(handle.getId()).thenReturn(1337l);
 			Mockito.when(itemMetadata.getPath()).thenReturn(PATH);
 			Mockito.when(itemMetadata.getSize()).thenReturn(Optional.of(42l));
-			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet(), Mockito.anyLong())).thenReturn(handle);
+			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(handle);
 			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
 			Mockito.when(provider.itemMetadata(Mockito.eq(PATH))).thenReturn(CompletableFuture.completedFuture(itemMetadata));
 
 			var actualResult = cloudFs.create(PATH.toString(), mode, fi);
 
 			Assertions.assertEquals(0, actualResult);
-			Mockito.verify(fileFactory).open(Mockito.eq(PATH), Mockito.any(), Mockito.eq(42l));
+			Mockito.verify(fileFactory).open(Mockito.eq(PATH), Mockito.any(), Mockito.eq(42l), Mockito.any());
 			Assertions.assertEquals(handle.getId(), fi.fh.longValue());
 		}
 

@@ -20,6 +20,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -42,7 +43,7 @@ public class CachedFileTest {
 		this.fileChannel = Mockito.mock(FileChannel.class);
 		this.populatedRanges = Mockito.mock(RangeSet.class);
 		this.onClose = Mockito.mock(Consumer.class);
-		this.cachedFile = new CachedFile(file, fileChannel, provider, populatedRanges, onClose);
+		this.cachedFile = new CachedFile(file, fileChannel, provider, populatedRanges, Instant.EPOCH, onClose);
 		Mockito.when(fileChannel.size()).thenReturn(100l);
 	}
 
@@ -51,7 +52,7 @@ public class CachedFileTest {
 	@ValueSource(longs = {0l, 1l, 42l})
 	public void testCreate(long size, @TempDir Path tmpDir) throws IOException {
 		Path tmpFile = tmpDir.resolve("cache.file");
-		try (var cachedFile = CachedFile.create(file, tmpFile, provider, size, onClose)) {
+		try (var cachedFile = CachedFile.create(file, tmpFile, provider, size, Instant.EPOCH, onClose)) {
 			Assertions.assertNotNull(cachedFile);
 			Assertions.assertEquals(size, Files.size(tmpFile));
 		}

@@ -24,17 +24,16 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
-import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.function.BiFunction;
 import java.util.function.Function;
 
 public class CloudAccessFS extends FuseStubFS implements FuseFS {
@@ -83,6 +82,11 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int getattr(String path, FileStat stat) {
+		var cachedMetadata = cachedFileFactory.getCachedMetadata(Path.of(path));
+		if (cachedMetadata.isPresent()) {
+			Attributes.copy(cachedMetadata.get(), stat);
+			return 0;
+		}
 		var returnCode = provider.itemMetadata(Path.of(path)).thenApply(metadata -> {
 			Attributes.copy(metadata, stat);
 			return 0;
@@ -149,7 +153,9 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			final var type = metadata.getItemType();
 			if (type == CloudItemType.FILE) {
 				try {
-					var handle = cachedFileFactory.open(Path.of(path), BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), metadata.getSize().orElse(0l));
+					var size = metadata.getSize().orElse(0l);
+					var lastModified = metadata.getLastModifiedDate().orElse(Instant.EPOCH);
+					var handle = cachedFileFactory.open(Path.of(path), BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, lastModified);
 					fi.fh.set(handle.getId());
 					return 0;
 				} catch (IOException e) {
@@ -226,18 +232,20 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 				.handle((metadata, exception) -> {
 					if (exception == null) {
 						// no exception means: 0-byte file successfully created
-						return CompletableFuture.completedFuture(0l);
+						return CompletableFuture.completedFuture(metadata);
 					} else if (exception instanceof AlreadyExistsException) {
-						// in case of an already existing file, return the existing file's size
-						return provider.itemMetadata(path).thenApply(CloudItemMetadata::getSize).thenApply(Optional::get);
+						// in case of an already existing file, return the existing file's metadata
+						return provider.itemMetadata(path);
 					} else {
-						return CompletableFuture.<Long>failedFuture(exception);
+						return CompletableFuture.<CloudItemMetadata>failedFuture(exception);
 					}
 				})
 				.thenCompose(Function.identity())
-				.thenApply(fileSize -> {
+				.thenApply(metadata -> {
 					try {
-						var handle = cachedFileFactory.open(path, BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), fileSize);
+						var size = metadata.getSize().orElse(0l);
+						var lastModified = metadata.getLastModifiedDate().orElse(Instant.EPOCH);
+						var handle = cachedFileFactory.open(path, BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, lastModified);
 						fi.fh.set(handle.getId());
 						return 0;
 					} catch (IOException e) {

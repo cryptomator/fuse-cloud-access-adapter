@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Arrays;
 
 import static java.nio.charset.StandardCharsets.US_ASCII;
@@ -45,7 +46,7 @@ public class AccessPatternIntegrationTest {
 	@Test
 	@Disabled // requires java.library.path to be set
 	@DisplayName("simulate TextEdit.app's access pattern during save")
-	void testAppleAutosaveAccessPattern() throws IOException {
+	void testAppleAutosaveAccessPattern() throws IOException, InterruptedException {
 		// echo "asd" > foo.txt
 		FuseFileInfo fi1 = TestFileInfo.create();
 		fs.create("/foo.txt", 0644, fi1);
@@ -55,11 +56,23 @@ public class AccessPatternIntegrationTest {
 		// mkdir foo.txt-temp3000
 		fs.mkdir("/foo.txt-temp3000", 0755);
 
+		// wait a bit (so that we can check if st_mtim updated)
+		Thread.sleep(100);
+
 		// echo "asdasd" > foo.txt-temp3000/foo.txt
 		FuseFileInfo fi2 = TestFileInfo.create();
 		fs.create("/foo.txt-temp3000/foo.txt", 0644, fi2);
 		fs.write("/foo.txt-temp3000/foo.txt", mockPointer(US_ASCII.encode("asdasd")), 6, 0, fi2);
 		Assertions.assertTrue(Files.exists(tmpDir.resolve("foo.txt-temp3000/foo.txt")));
+
+		// check updated metadata:
+		TestFileStat stat1 = TestFileStat.create();
+		TestFileStat stat2 = TestFileStat.create();
+		fs.getattr("/foo.txt", stat1);
+		fs.getattr("/foo.txt-temp3000/foo.txt", stat2);
+		Assertions.assertEquals(3, stat1.st_size.intValue());
+		Assertions.assertEquals(6, stat2.st_size.intValue());
+		Assertions.assertTrue(stat1.st_mtim.tv_nsec.longValue() < stat2.st_mtim.tv_nsec.longValue(), "modified date of stat1 is before stat2");
 
 		// mv foo.txt foo.txt-temp3001
 		fs.rename("/foo.txt", "/foo.txt-temp3001");

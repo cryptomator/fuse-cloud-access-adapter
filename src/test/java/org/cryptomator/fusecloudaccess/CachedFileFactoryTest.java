@@ -12,6 +12,7 @@ import org.mockito.Mockito;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -32,7 +33,7 @@ public class CachedFileFactoryTest {
 	@Test
 	@DisplayName("can get(...) file handle after opening a file")
 	public void testAfterOpenTheOpenFileIsPresent() throws IOException {
-		var handle = cachedFileFactory.open(PATH, OPEN_FLAGS, 42l);
+		var handle = cachedFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 
 		var sameHandle = cachedFileFactory.get(handle.getId());
 		Assertions.assertSame(handle, sameHandle.get());
@@ -41,7 +42,7 @@ public class CachedFileFactoryTest {
 	@Test
 	@DisplayName("closing removes file handle")
 	public void testClosingReleasesHandle() throws IOException, ExecutionException, InterruptedException {
-		var handle = cachedFileFactory.open(PATH, OPEN_FLAGS, 42l);
+		var handle = cachedFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 		Assumptions.assumeTrue(cachedFileFactory.get(handle.getId()).isPresent());
 
 		var futureResult = cachedFileFactory.close(handle.getId());
@@ -63,8 +64,8 @@ public class CachedFileFactoryTest {
 	@Test
 	@DisplayName("opening the same file twice leads to distinct file handles")
 	public void testFileHandlesAreDistinct() throws IOException {
-		var handle1 = cachedFileFactory.open(PATH, OPEN_FLAGS, 42l);
-		var handle2 = cachedFileFactory.open(PATH, OPEN_FLAGS, 42l);
+		var handle1 = cachedFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
+		var handle2 = cachedFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 
 		Assertions.assertNotEquals(handle1, handle2);
 	}

@@ -5,6 +5,8 @@ import com.google.common.collect.ImmutableRangeSet;
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
 import com.google.common.collect.TreeRangeSet;
+import org.cryptomator.cloudaccess.api.CloudItemMetadata;
+import org.cryptomator.cloudaccess.api.CloudItemType;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.slf4j.Logger;
@@ -13,11 +15,14 @@ import org.slf4j.LoggerFactory;
 import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
@@ -41,24 +46,27 @@ public class CachedFile implements Closeable {
 	private final Consumer<Path> onClose;
 	private final ConcurrentMap<Long, CachedFileHandle> handles;
 	private Path path;
+	private Instant lastModified;
 	private boolean dirty;
 	private boolean deleted;
 
-	CachedFile(Path path, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Consumer<Path> onClose) {
+	// visible for testing
+	CachedFile(Path path, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified, Consumer<Path> onClose) {
 		this.fc = fc;
 		this.provider = provider;
 		this.populatedRanges = populatedRanges;
 		this.onClose = onClose;
 		this.handles = new ConcurrentHashMap<>();
 		this.path = path;
+		this.lastModified = initialLastModified;
 	}
 
-	public static CachedFile create(Path path, Path tmpFilePath, CloudProvider provider, long initialSize, Consumer<Path> onClose) throws IOException {
+	public static CachedFile create(Path path, Path tmpFilePath, CloudProvider provider, long initialSize, Instant initialLastModified, Consumer<Path> onClose) throws IOException {
 		var fc = FileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE);
 		if (initialSize > 0) {
 			fc.write(ByteBuffer.allocateDirect(1), initialSize - 1); // grow file to initialSize
 		}
-		return new CachedFile(path, fc, provider, TreeRangeSet.create(), onClose);
+		return new CachedFile(path, fc, provider, TreeRangeSet.create(), initialLastModified, onClose);
 	}
 
 	@Override
@@ -152,6 +160,7 @@ public class CachedFile implements Closeable {
 	}
 
 	void markDirty() {
+		this.lastModified = Instant.now();
 		this.dirty = true;
 	}
 
@@ -168,5 +177,13 @@ public class CachedFile implements Closeable {
 
 	void updatePath(Path newPath) {
 		this.path = newPath;
+	}
+
+	CloudItemMetadata getMetadata() {
+		try {
+			return new CloudItemMetadata(path.getFileName().toString(), path, CloudItemType.FILE, Optional.of(lastModified), Optional.of(fc.size()));
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
 	}
 }

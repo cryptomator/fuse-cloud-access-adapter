@@ -1,6 +1,7 @@
 package org.cryptomator.fusecloudaccess;
 
 import jnr.constants.platform.OpenFlags;
+import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,6 +10,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -43,9 +45,9 @@ class CachedFileFactory {
 	 * @param flags file open options
 	 * @return file handle used to identify and close open files.
 	 */
-	public CachedFileHandle open(Path path, Set<OpenFlags> flags, long initialSize) throws IOException {
+	public CachedFileHandle open(Path path, Set<OpenFlags> flags, long initialSize, Instant lastModified) throws IOException {
 		try {
-			var cachedFile = cachedFiles.computeIfAbsent(path, p -> this.createCachedFile(p, initialSize));
+			var cachedFile = cachedFiles.computeIfAbsent(path, p -> this.createCachedFile(p, initialSize, lastModified));
 			var fileHandle = cachedFile.openFileHandle();
 			if (flags.contains(OpenFlags.O_TRUNC)) {
 				cachedFile.truncate(0);
@@ -57,10 +59,10 @@ class CachedFileFactory {
 		}
 	}
 
-	private CachedFile createCachedFile(Path path, long initialSize) {
+	private CachedFile createCachedFile(Path path, long initialSize, Instant lastModified) {
 		try {
 			var tmpFile = cacheDir.resolve(UUID.randomUUID().toString());
-			return CachedFile.create(path, tmpFile, provider, initialSize, p -> {
+			return CachedFile.create(path, tmpFile, provider, initialSize, lastModified, p -> {
 				try {
 					Files.deleteIfExists(tmpFile);
 				} catch (IOException e) {
@@ -125,5 +127,9 @@ class CachedFileFactory {
 			}
 			return null; // removes entry from map
 		});
+	}
+
+	Optional<CloudItemMetadata> getCachedMetadata(Path path) {
+		return Optional.ofNullable(cachedFiles.get(path)).map(CachedFile::getMetadata);
 	}
 }
