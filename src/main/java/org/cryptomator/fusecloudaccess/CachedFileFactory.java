@@ -108,7 +108,9 @@ class CachedFileFactory {
 			if (previouslyCachedFile != null) {
 				previouslyCachedFile.markDeleted();
 			}
-			cachedFile.updatePath(newPath);
+			if (cachedFile != null) {
+				cachedFile.updatePath(newPath);
+			}
 			return cachedFile; // removes entry from map if
 		});
 	}
