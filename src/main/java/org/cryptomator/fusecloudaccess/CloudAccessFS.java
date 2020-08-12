@@ -266,6 +266,12 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	@Override
+	public int chmod(String path, long mode) {
+		// TODO: This must be implemented! Otherwise TextEdit.app fails to save text files.
+		return 0;
+	}
+
+	@Override
 	public int rmdir(String path) {
 		return deleteResource(Path.of(path), "rmdir() failed");
 	}
