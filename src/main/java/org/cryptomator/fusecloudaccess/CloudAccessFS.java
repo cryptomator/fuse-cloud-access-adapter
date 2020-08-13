@@ -19,6 +19,7 @@ import ru.serce.jnrfuse.FuseFillDir;
 import ru.serce.jnrfuse.FuseStubFS;
 import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
+import ru.serce.jnrfuse.struct.Statvfs;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -38,6 +39,7 @@ import java.util.function.Function;
 public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	private static final Logger LOG = LoggerFactory.getLogger(CloudAccessFS.class);
+	private static final int BLOCKSIZE = 4096;
 
 	private final CloudProvider provider;
 	private final int timeoutMillis;
@@ -77,6 +79,22 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		} catch (TimeoutException e) {
 			return -ErrorCodes.ETIMEDOUT();
 		}
+	}
+
+	@Override
+	public int statfs(String path, Statvfs stbuf) {
+		long total = 1_000_000_000; // 1 GB TODO: get info from cloud or config
+		long avail = 500_000_000; // 500 MB TODO: get info from cloud or config
+		long tBlocks = total / BLOCKSIZE;
+		long aBlocks = avail / BLOCKSIZE;
+		stbuf.f_bsize.set(BLOCKSIZE);
+		stbuf.f_frsize.set(BLOCKSIZE);
+		stbuf.f_blocks.set(tBlocks);
+		stbuf.f_bavail.set(aBlocks);
+		stbuf.f_bfree.set(aBlocks);
+		stbuf.f_namemax.set(146); // no shortening atm
+		LOG.trace("statfs {} ({} / {})", path, avail, total);
+		return 0;
 	}
 
 	@Override
