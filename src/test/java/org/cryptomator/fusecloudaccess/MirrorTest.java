@@ -43,7 +43,6 @@ public class MirrorTest {
 						"-oauto_xattr",
 						"-oauto_cache",
 						"-ovolname=CloudAccessMirror",
-						"-ordonly", // TODO remove once we support writing
 						"-omodules=iconv,from_code=UTF-8,to_code=UTF-8-MAC", // show files names in Unicode NFD encoding
 						"-onoappledouble", // vastly impacts performance for some reason...
 						"-odefault_permissions" // let the kernel assume permissions based on file attributes etc
@@ -76,7 +75,6 @@ public class MirrorTest {
 						"-oauto_unmount",
 						"-oauto_cache",
 						"-ovolname=CloudAccessMirror",
-						"-ordonly", // TODO remove once we support writing
 						"-odefault_permissions" // let the kernel assume permissions based on file attributes etc
 				};
 				//mount

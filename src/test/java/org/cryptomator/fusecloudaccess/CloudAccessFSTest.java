@@ -26,10 +26,12 @@ import ru.serce.jnrfuse.FuseFillDir;
 import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -42,7 +44,7 @@ public class CloudAccessFSTest {
 
 	private CloudAccessFS cloudFs;
 	private CloudProvider provider;
-	private OpenFileFactory fileFactory;
+	private CachedFileFactory fileFactory;
 	private OpenDirFactory dirFactory;
 
 	@BeforeAll
@@ -56,7 +58,7 @@ public class CloudAccessFSTest {
 	@BeforeEach
 	public void setup() {
 		provider = Mockito.mock(CloudProvider.class);
-		fileFactory = Mockito.mock(OpenFileFactory.class);
+		fileFactory = Mockito.mock(CachedFileFactory.class);
 		dirFactory = Mockito.mock(OpenDirFactory.class);
 		cloudFs = new CloudAccessFS(provider, CloudAccessFSTest.TIMEOUT, fileFactory, dirFactory);
 	}
@@ -298,24 +300,23 @@ public class CloudAccessFSTest {
 		@BeforeEach
 		public void setup() {
 			fi = TestFileInfo.create();
+			fi.fh.set(0L);
 		}
 
 		@DisplayName("open() returns 0 in success and writes the handle to field FileInfo.fh")
 		@Test
-		public void testSuccessfulOpenReturnsZeroAndStoresHandle() {
-			long expectedHandle = ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE);
-			fi.fh.set(0L);
-
+		public void testSuccessfulOpenReturnsZeroAndStoresHandle() throws IOException {
+			CachedFileHandle handle = Mockito.mock(CachedFileHandle.class);
 			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
 			Mockito.when(itemMetadata.getItemType()).thenReturn(CloudItemType.FILE);
-
-			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet())).thenReturn(expectedHandle);
+			Mockito.when(handle.getId()).thenReturn(42l);
+			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(handle);
 			Mockito.when(provider.itemMetadata(PATH)).thenReturn(CompletableFuture.completedFuture(itemMetadata));
 
 			var result = cloudFs.open(PATH.toString(), fi);
 
 			Assertions.assertEquals(0, result);
-			Assertions.assertEquals(expectedHandle, fi.fh.get());
+			Assertions.assertEquals(42l, fi.fh.get());
 		}
 
 		@DisplayName("open() returns EISDIR if the path points to a directory")
@@ -370,21 +371,21 @@ public class CloudAccessFSTest {
 	class ReadTest {
 
 		private TestFileInfo fi;
-		private OpenFile file;
+		private CachedFileHandle fileHandle;
 		private Pointer buf;
 
 		@BeforeEach
 		public void setup() {
 			fi = TestFileInfo.create();
-			file = Mockito.mock(OpenFile.class);
+			fileHandle = Mockito.mock(CachedFileHandle.class);
 			buf = Mockito.mock(Pointer.class);
 		}
 
 		@DisplayName("read() returns 0 on success")
 		@Test
 		public void testSuccessfulReadReturnsZero() {
-			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(file));
-			Mockito.when(file.read(buf, 1l, 2l)).thenReturn(CompletableFuture.completedFuture(0));
+			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(fileHandle));
+			Mockito.when(fileHandle.read(buf, 1l, 2l)).thenReturn(CompletableFuture.completedFuture(0));
 
 			var result = cloudFs.read(PATH.toString(), buf, 2l, 1l, fi);
 
@@ -394,8 +395,8 @@ public class CloudAccessFSTest {
 		@DisplayName("read() returns ENOENT if resource is not found")
 		@Test
 		public void testNotFoundExceptionReturnsENOENT() {
-			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(file));
-			Mockito.when(file.read(buf, 1l, 2l)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
+			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(fileHandle));
+			Mockito.when(fileHandle.read(buf, 1l, 2l)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
 
 			var result = cloudFs.read(PATH.toString(), buf, 2l, 1l, fi);
 
@@ -406,8 +407,8 @@ public class CloudAccessFSTest {
 		@ValueSource(classes = {CloudProviderException.class, RuntimeException.class})
 		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
-			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(file));
-			Mockito.when(file.read(buf, 1l, 2l)).thenReturn(CompletableFuture.failedFuture(e));
+			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(fileHandle));
+			Mockito.when(fileHandle.read(buf, 1l, 2l)).thenReturn(CompletableFuture.failedFuture(e));
 
 			var result = cloudFs.read(PATH.toString(), buf, 2l, 1l, fi);
 
@@ -427,6 +428,66 @@ public class CloudAccessFSTest {
 	}
 
 	@Nested
+	class WriteTest {
+
+		private TestFileInfo fi;
+		private CachedFileHandle fileHandle;
+		private Pointer buf;
+
+		@BeforeEach
+		public void setup() {
+			fi = TestFileInfo.create();
+			fileHandle = Mockito.mock(CachedFileHandle.class);
+			buf = Mockito.mock(Pointer.class);
+		}
+
+		@DisplayName("write() returns 0 on success")
+		@Test
+		public void testSuccessfulReadReturnsZero() {
+			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(fileHandle));
+			Mockito.when(fileHandle.write(buf, 1l, 2l)).thenReturn(CompletableFuture.completedFuture(0));
+
+			var result = cloudFs.write(PATH.toString(), buf, 2l, 1l, fi);
+
+			Assertions.assertEquals(0, result);
+		}
+
+		@DisplayName("write() returns ENOENT if resource is not found")
+		@Test
+		public void testNotFoundExceptionReturnsENOENT() {
+			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(fileHandle));
+			Mockito.when(fileHandle.write(buf, 1l, 2l)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
+
+			var result = cloudFs.write(PATH.toString(), buf, 2l, 1l, fi);
+
+			Assertions.assertEquals(-ErrorCodes.ENOENT(), result);
+		}
+
+		@ParameterizedTest(name = "write() returns EIO on any other exception (expected or not)")
+		@ValueSource(classes = {CloudProviderException.class, RuntimeException.class})
+		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
+			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
+			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(fileHandle));
+			Mockito.when(fileHandle.write(buf, 1l, 2l)).thenReturn(CompletableFuture.failedFuture(e));
+
+			var result = cloudFs.write(PATH.toString(), buf, 2l, 1l, fi);
+
+			Assertions.assertEquals(-ErrorCodes.EIO(), result);
+		}
+
+		@DisplayName("write() returns EBADF if file is not opened before")
+		@Test
+		public void testNotExistingHandleReturnsEBADF() {
+			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.empty());
+
+			var result = cloudFs.write(PATH.toString(), buf, 2l, 1l, fi);
+
+			Assertions.assertEquals(-ErrorCodes.EBADF(), result);
+		}
+
+	}
+
+	@Nested
 	class RenameTest {
 
 		private Path oldPath = Path.of("location/number/one");
@@ -435,37 +496,28 @@ public class CloudAccessFSTest {
 		@DisplayName("rename(...) returns zero on success")
 		@Test
 		public void testSuccessReturnsZero() {
-			Mockito.when(provider.move(oldPath, newPath, false))
-					.thenReturn(CompletableFuture.completedFuture(newPath));
-			Assertions.assertEquals(0, cloudFs.rename(oldPath.toString(), newPath.toString()));
+			Mockito.when(provider.move(oldPath, newPath, true)).thenReturn(CompletableFuture.completedFuture(newPath));
+
+			var actualCode = cloudFs.rename(oldPath.toString(), newPath.toString());
+
+			Assertions.assertEquals(0, actualCode);
+			Mockito.verify(fileFactory).moved(oldPath, newPath);
 		}
 
 		@DisplayName("rename(...) returns ENOENT if cannot be found")
 		@Test
 		public void testNotFoundExceptionReturnsENOENT() {
-			Mockito.when(provider.move(oldPath, newPath, false))
-					.thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
+			Mockito.when(provider.move(oldPath, newPath, true)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
 
 			var actualCode = cloudFs.rename(oldPath.toString(), newPath.toString());
 
 			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualCode);
 		}
 
-		@DisplayName("rename(...) never overwrites existing targets")
-		@Test
-		public void testAlreadyExistingPathsAreNeverReplaced() {
-			Mockito.when(provider.move(Mockito.any(Path.class), Mockito.any(Path.class), Mockito.anyBoolean()))
-					.thenReturn(CompletableFuture.completedFuture(newPath));
-
-			cloudFs.rename(oldPath.toString(), newPath.toString());
-			Mockito.verify(provider, Mockito.never()).move(oldPath, newPath, true);
-		}
-
 		@DisplayName("rename(...) returns EEXIST if target already exists")
 		@Test
 		public void tesAlreadyExistsExceptionReturnsEEXIST() {
-			Mockito.when(provider.move(oldPath, newPath, false))
-					.thenReturn(CompletableFuture.failedFuture(new AlreadyExistsException(newPath.toString())));
+			Mockito.when(provider.move(oldPath, newPath, true)).thenReturn(CompletableFuture.failedFuture(new AlreadyExistsException(newPath.toString())));
 
 			var actualCode = cloudFs.rename(oldPath.toString(), newPath.toString());
 
@@ -476,8 +528,7 @@ public class CloudAccessFSTest {
 		@ValueSource(classes = {CloudProviderException.class, Exception.class})
 		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
-			Mockito.when(provider.move(oldPath, newPath, false))
-					.thenReturn(CompletableFuture.failedFuture(e));
+			Mockito.when(provider.move(oldPath, newPath, true)).thenReturn(CompletableFuture.failedFuture(e));
 
 			var actualCode = cloudFs.rename(oldPath.toString(), newPath.toString());
 
@@ -528,68 +579,82 @@ public class CloudAccessFSTest {
 	class CreateTest {
 
 		private FuseFileInfo fi;
+		private Set<OpenFlags> openFlags;
+		private long mode;
 
 		@BeforeEach
 		public void setup() {
-			fi = TestFileInfo.create();
+			this.fi = TestFileInfo.create();
+			this.openFlags = Set.of(OpenFlags.O_CREAT, OpenFlags.O_RDWR);
+			this.mode = BitMaskEnumUtil.setToBitMask(openFlags);
 		}
 
 		@DisplayName("create(...) in not existing case returns 0 on success and opens file")
 		@Test
-		public void testNotExistingCaseReturnsZeroAndOpensFile() {
-			long expectedHandle = 1337;
+		public void testNotExistingCaseReturnsZeroAndOpensFile() throws IOException {
 			fi.fh.set(0);
-			fi.flags.set(0777);
+			CachedFileHandle handle = Mockito.mock(CachedFileHandle.class);
 			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
+			Mockito.when(handle.getId()).thenReturn(1337l);
 			Mockito.when(itemMetadata.getPath()).thenReturn(PATH);
-			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet())).thenReturn(1337L);
-			var openFlags = BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue());
-			Mockito.when(provider.write(Mockito.any(Path.class), Mockito.anyBoolean(), Mockito.any(InputStream.class), Mockito.any(ProgressListener.class)))
-					.thenReturn(CompletableFuture.completedFuture(itemMetadata));
+			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(handle);
+			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(itemMetadata));
 
-			var actualResult = cloudFs.create(PATH.toString(), OpenFlags.O_RDWR.longValue(), fi);
+			var actualResult = cloudFs.create(PATH.toString(), mode, fi);
 
 			Assertions.assertEquals(0, actualResult);
-			Mockito.verify(fileFactory).open(PATH, openFlags);
-			Assertions.assertEquals(expectedHandle, fi.fh.longValue());
+			Mockito.verify(fileFactory).open(Mockito.eq(PATH), Mockito.any(), Mockito.eq(0l), Mockito.any());
+			Assertions.assertEquals(handle.getId(), fi.fh.longValue());
 		}
 
 		@DisplayName("create(...) in existing case returns 0 and opens file")
 		@Test
-		public void testExistingCaseReturnsZeroAndOpensFile() {
-			long expectedHandle = 1337;
+		public void testExistingCaseReturnsZeroAndOpensFile() throws IOException {
 			fi.fh.set(0);
-			fi.flags.set(0777);
-			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet())).thenReturn(1337L);
-			var openFlags = BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue());
-			Mockito.when(provider.write(Mockito.any(Path.class), Mockito.anyBoolean(), Mockito.any(InputStream.class), Mockito.any(ProgressListener.class)))
-					.thenReturn(CompletableFuture.failedFuture(new AlreadyExistsException(PATH.toString())));
+			var e = new AlreadyExistsException(PATH.toString());
+			CachedFileHandle handle = Mockito.mock(CachedFileHandle.class);
+			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
+			Mockito.when(handle.getId()).thenReturn(1337l);
+			Mockito.when(itemMetadata.getPath()).thenReturn(PATH);
+			Mockito.when(itemMetadata.getSize()).thenReturn(Optional.of(42l));
+			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(handle);
+			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
+			Mockito.when(provider.itemMetadata(Mockito.eq(PATH))).thenReturn(CompletableFuture.completedFuture(itemMetadata));
 
-			var actualResult = cloudFs.create(PATH.toString(), OpenFlags.O_RDWR.longValue(), fi);
+			var actualResult = cloudFs.create(PATH.toString(), mode, fi);
 
 			Assertions.assertEquals(0, actualResult);
-			Mockito.verify(fileFactory).open(PATH, openFlags);
-			Assertions.assertEquals(expectedHandle, fi.fh.longValue());
+			Mockito.verify(fileFactory).open(Mockito.eq(PATH), Mockito.any(), Mockito.eq(42l), Mockito.any());
+			Assertions.assertEquals(handle.getId(), fi.fh.longValue());
 		}
 
 		@DisplayName("create(...) returns ENOENT on NotFoundException")
 		@Test
 		public void testNotFoundExceptionReturnsENOENT() {
-			Mockito.when(provider.write(Mockito.any(Path.class), Mockito.anyBoolean(), Mockito.any(InputStream.class), Mockito.any(ProgressListener.class)))
-					.thenReturn(CompletableFuture.failedFuture(new NotFoundException(PATH.toString())));
+			var e = new NotFoundException(PATH.toString());
+			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
 
-			var actualResult = cloudFs.create(PATH.toString(), OpenFlags.O_RDWR.longValue(), fi);
+			var actualResult = cloudFs.create(PATH.toString(), mode, fi);
 
 			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualResult);
 		}
 
+		@DisplayName("create(...) returns EISDIR on TypeMismatchException")
+		@Test
+		public void testTypeMismatchExceptionReturnsEISDIR() {
+			var e = new TypeMismatchException(PATH.toString());
+			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
+
+			var actualResult = cloudFs.create(PATH.toString(), mode, fi);
+
+			Assertions.assertEquals(-ErrorCodes.EISDIR(), actualResult);
+		}
+
 		@ParameterizedTest(name = "create(...) returns EIO on any other exception (expected or not)")
-		@ValueSource(classes = {TypeMismatchException.class, CloudProviderException.class, Exception.class})
+		@ValueSource(classes = {CloudProviderException.class, Exception.class})
 		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
-			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
-			long mode = OpenFlags.O_RDWR.longValue();
-			Mockito.when(provider.write(Mockito.any(Path.class), Mockito.anyBoolean(), Mockito.any(InputStream.class), Mockito.any(ProgressListener.class)))
-					.thenReturn(CompletableFuture.failedFuture(e));
+			var e = exceptionClass.getDeclaredConstructor().newInstance();
+			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
 
 			var actualResult = cloudFs.create(PATH.toString(), mode, fi);
 

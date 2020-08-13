@@ -9,7 +9,6 @@ import ru.serce.jnrfuse.FuseFillDir;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
