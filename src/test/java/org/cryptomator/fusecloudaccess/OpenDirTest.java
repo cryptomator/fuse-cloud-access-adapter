@@ -4,6 +4,7 @@ import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudItemList;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudItemType;
+import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import ru.serce.jnrfuse.FuseFillDir;
 
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -20,7 +20,7 @@ import java.util.concurrent.CompletableFuture;
 
 public class OpenDirTest {
 
-	private final Path path = Path.of("/path/to/dir");
+	private final CloudPath path = CloudPath.of("/path/to/dir");
 	private final CloudItemMetadata m1 = new CloudItemMetadata("m1", path.resolve("m1"), CloudItemType.FILE);
 	private final CloudItemMetadata m2 = new CloudItemMetadata("m2", path.resolve("m2"), CloudItemType.FILE);
 	private final CloudItemMetadata m3 = new CloudItemMetadata("m3", path.resolve("m3"), CloudItemType.FILE);

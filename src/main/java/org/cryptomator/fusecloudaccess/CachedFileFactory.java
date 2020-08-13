@@ -2,6 +2,7 @@ package org.cryptomator.fusecloudaccess;
 
 import jnr.constants.platform.OpenFlags;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
+import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,7 +26,7 @@ class CachedFileFactory {
 
 	private static final Logger LOG = LoggerFactory.getLogger(CachedFileFactory.class);
 
-	private final ConcurrentMap<Path, CachedFile> cachedFiles = new ConcurrentHashMap<>();
+	private final ConcurrentMap<CloudPath, CachedFile> cachedFiles = new ConcurrentHashMap<>();
 	private final Map<Long, CachedFileHandle> fileHandles = new HashMap<>();
 	private final CloudProvider provider;
 	private final Path cacheDir;
@@ -45,7 +46,7 @@ class CachedFileFactory {
 	 * @param flags file open options
 	 * @return file handle used to identify and close open files.
 	 */
-	public CachedFileHandle open(Path path, Set<OpenFlags> flags, long initialSize, Instant lastModified) throws IOException {
+	public CachedFileHandle open(CloudPath path, Set<OpenFlags> flags, long initialSize, Instant lastModified) throws IOException {
 		try {
 			var cachedFile = cachedFiles.computeIfAbsent(path, p -> this.createCachedFile(p, initialSize, lastModified));
 			var fileHandle = cachedFile.openFileHandle();
@@ -59,7 +60,7 @@ class CachedFileFactory {
 		}
 	}
 
-	private CachedFile createCachedFile(Path path, long initialSize, Instant lastModified) {
+	private CachedFile createCachedFile(CloudPath path, long initialSize, Instant lastModified) {
 		try {
 			var tmpFile = cacheDir.resolve(UUID.randomUUID().toString());
 			return CachedFile.create(path, tmpFile, provider, initialSize, lastModified, p -> {
@@ -102,7 +103,7 @@ class CachedFileFactory {
 	 * @param oldPath Path to a cached file before it has been moved
 	 * @param newPath New path which is used to access the cached file
 	 */
-	public void moved(Path oldPath, Path newPath) {
+	public void moved(CloudPath oldPath, CloudPath newPath) {
 		var cachedFile = cachedFiles.get(oldPath);
 		cachedFiles.compute(newPath, (path, previouslyCachedFile) -> {
 			if (previouslyCachedFile != null) {
@@ -122,7 +123,7 @@ class CachedFileFactory {
 	 *
 	 * @param path Path to a cached file
 	 */
-	public void delete(Path path) {
+	public void delete(CloudPath path) {
 		cachedFiles.compute(path, (p, cachedFile) -> {
 			if (cachedFile != null) {
 				cachedFile.markDeleted();
@@ -131,7 +132,7 @@ class CachedFileFactory {
 		});
 	}
 
-	Optional<CloudItemMetadata> getCachedMetadata(Path path) {
+	Optional<CloudItemMetadata> getCachedMetadata(CloudPath path) {
 		return Optional.ofNullable(cachedFiles.get(path)).map(CachedFile::getMetadata);
 	}
 }

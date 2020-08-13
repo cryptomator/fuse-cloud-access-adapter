@@ -5,6 +5,7 @@ import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudItemType;
+import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.cryptomator.cloudaccess.api.exceptions.AlreadyExistsException;
@@ -25,10 +26,8 @@ import java.io.InputStream;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
@@ -82,12 +81,12 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int getattr(String path, FileStat stat) {
-		var cachedMetadata = cachedFileFactory.getCachedMetadata(Path.of(path));
+		var cachedMetadata = cachedFileFactory.getCachedMetadata(CloudPath.of(path));
 		if (cachedMetadata.isPresent()) {
 			Attributes.copy(cachedMetadata.get(), stat);
 			return 0;
 		}
-		var returnCode = provider.itemMetadata(Path.of(path)).thenApply(metadata -> {
+		var returnCode = provider.itemMetadata(CloudPath.of(path)).thenApply(metadata -> {
 			Attributes.copy(metadata, stat);
 			return 0;
 		}).exceptionally(e -> {
@@ -103,9 +102,9 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int opendir(String path, FuseFileInfo fi) {
-		var returnCode = provider.itemMetadata(Path.of(path)).thenApply(metadata -> {
+		var returnCode = provider.itemMetadata(CloudPath.of(path)).thenApply(metadata -> {
 			if (metadata.getItemType() == CloudItemType.FOLDER) {
-				long dirHandle = openDirFactory.open(Path.of(path));
+				long dirHandle = openDirFactory.open(CloudPath.of(path));
 				fi.fh.set(dirHandle);
 				return 0;
 			} else {
@@ -155,13 +154,13 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int open(String path, FuseFileInfo fi) {
-		var returnCode = provider.itemMetadata(Path.of(path)).thenApply(metadata -> {
+		var returnCode = provider.itemMetadata(CloudPath.of(path)).thenApply(metadata -> {
 			final var type = metadata.getItemType();
 			if (type == CloudItemType.FILE) {
 				try {
 					var size = metadata.getSize().orElse(0l);
 					var lastModified = metadata.getLastModifiedDate().orElse(Instant.EPOCH);
-					var handle = cachedFileFactory.open(Path.of(path), BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, lastModified);
+					var handle = cachedFileFactory.open(CloudPath.of(path), BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, lastModified);
 					fi.fh.set(handle.getId());
 					return 0;
 				} catch (IOException e) {
@@ -195,9 +194,9 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int rename(String oldpath, String newpath) {
-		var returnCode = provider.move(Path.of(oldpath), Path.of(newpath), true)
+		var returnCode = provider.move(CloudPath.of(oldpath), CloudPath.of(newpath), true)
 				.thenApply(p -> {
-					cachedFileFactory.moved(Path.of(oldpath), Path.of(newpath));
+					cachedFileFactory.moved(CloudPath.of(oldpath), CloudPath.of(newpath));
 					return 0;
 				})
 				.exceptionally(completionThrowable -> {
@@ -216,7 +215,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int mkdir(String path, long mode) {
-		var returnCode = provider.createFolder(Path.of(path))
+		var returnCode = provider.createFolder(CloudPath.of(path))
 				.thenApply(p -> 0)
 				.exceptionally(completionThrowable -> {
 					var e = completionThrowable.getCause();
@@ -232,7 +231,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int create(String rawPath, long mode, FuseFileInfo fi) {
-		final var path = Path.of(rawPath);
+		final var path = CloudPath.of(rawPath);
 		var returnCode = provider
 				.write(path, false, InputStream.nullInputStream(), ProgressListener.NO_PROGRESS_AWARE)
 				.handle((metadata, exception) -> {
@@ -279,16 +278,16 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int rmdir(String path) {
-		return deleteResource(Path.of(path), "rmdir() failed");
+		return deleteResource(CloudPath.of(path), "rmdir() failed");
 	}
 
 	@Override
 	public int unlink(String path) {
-		return deleteResource(Path.of(path), "unlink() failed");
+		return deleteResource(CloudPath.of(path), "unlink() failed");
 	}
 
 	// visible for testing
-	int deleteResource(Path path, String msgOnError) {
+	int deleteResource(CloudPath path, String msgOnError) {
 		var returnCode = provider.delete(path)
 				.thenApply(ignored -> {
 					cachedFileFactory.delete(path);
@@ -344,7 +343,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int truncate(String path, long size) {
-		var file = Path.of(path);
+		var file = CloudPath.of(path);
 		LOG.info("TRUNCATE {} to {}", path, size);
 		var returnCode = provider.read(file, 0, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
 			// TODO optimize tmp file path

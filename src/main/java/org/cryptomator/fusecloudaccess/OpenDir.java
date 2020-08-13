@@ -4,10 +4,10 @@ import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
+import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import ru.serce.jnrfuse.FuseFillDir;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -17,12 +17,12 @@ import java.util.concurrent.CompletionStage;
 class OpenDir {
 
 	private final CloudProvider provider;
-	private final Path path;
+	private final CloudPath path;
 	private Optional<String> pageToken;
 	private List<String> children;
 	private boolean reachedEof;
 
-	public OpenDir(CloudProvider provider, Path path) {
+	public OpenDir(CloudProvider provider, CloudPath path) {
 		this.provider = provider;
 		this.path = path;
 		this.pageToken = Optional.empty();

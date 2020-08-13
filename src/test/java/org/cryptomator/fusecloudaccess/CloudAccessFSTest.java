@@ -5,8 +5,8 @@ import jnr.ffi.Pointer;
 import jnr.ffi.Runtime;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudItemType;
+import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
-import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.cryptomator.cloudaccess.api.exceptions.AlreadyExistsException;
 import org.cryptomator.cloudaccess.api.exceptions.CloudProviderException;
 import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
@@ -27,9 +27,7 @@ import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.lang.reflect.InvocationTargetException;
-import java.nio.file.Path;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -39,7 +37,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class CloudAccessFSTest {
 
 	private static final Runtime RUNTIME = Runtime.getSystemRuntime();
-	private static final Path PATH = Path.of("some/path/to/resource");
+	private static final CloudPath PATH = CloudPath.of("some/path/to/resource");
 	private static final int TIMEOUT = 100;
 
 	private CloudAccessFS cloudFs;
@@ -310,7 +308,7 @@ public class CloudAccessFSTest {
 			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
 			Mockito.when(itemMetadata.getItemType()).thenReturn(CloudItemType.FILE);
 			Mockito.when(handle.getId()).thenReturn(42l);
-			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(handle);
+			Mockito.when(fileFactory.open(Mockito.any(), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(handle);
 			Mockito.when(provider.itemMetadata(PATH)).thenReturn(CompletableFuture.completedFuture(itemMetadata));
 
 			var result = cloudFs.open(PATH.toString(), fi);
@@ -490,8 +488,8 @@ public class CloudAccessFSTest {
 	@Nested
 	class RenameTest {
 
-		private Path oldPath = Path.of("location/number/one");
-		private Path newPath = Path.of("location/number/two");
+		private CloudPath oldPath = CloudPath.of("location/number/one");
+		private CloudPath newPath = CloudPath.of("location/number/two");
 
 		@DisplayName("rename(...) returns zero on success")
 		@Test
@@ -597,7 +595,7 @@ public class CloudAccessFSTest {
 			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
 			Mockito.when(handle.getId()).thenReturn(1337l);
 			Mockito.when(itemMetadata.getPath()).thenReturn(PATH);
-			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(handle);
+			Mockito.when(fileFactory.open(Mockito.any(), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(handle);
 			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(itemMetadata));
 
 			var actualResult = cloudFs.create(PATH.toString(), mode, fi);
@@ -617,7 +615,7 @@ public class CloudAccessFSTest {
 			Mockito.when(handle.getId()).thenReturn(1337l);
 			Mockito.when(itemMetadata.getPath()).thenReturn(PATH);
 			Mockito.when(itemMetadata.getSize()).thenReturn(Optional.of(42l));
-			Mockito.when(fileFactory.open(Mockito.any(Path.class), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(handle);
+			Mockito.when(fileFactory.open(Mockito.any(), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(handle);
 			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
 			Mockito.when(provider.itemMetadata(Mockito.eq(PATH))).thenReturn(CompletableFuture.completedFuture(itemMetadata));
 

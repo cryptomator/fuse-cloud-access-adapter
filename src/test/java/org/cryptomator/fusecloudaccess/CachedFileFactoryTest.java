@@ -1,6 +1,7 @@
 package org.cryptomator.fusecloudaccess;
 
 import jnr.constants.platform.OpenFlags;
+import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Assumptions;
@@ -10,16 +11,14 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
 public class CachedFileFactoryTest {
 
-	private static final Path PATH = Path.of("this/is/a/path");
+	private static final CloudPath PATH = CloudPath.of("this/is/a/path");
 	private static final Set<OpenFlags> OPEN_FLAGS = Set.of(OpenFlags.O_RDONLY);
 
 	private CloudProvider provider = Mockito.mock(CloudProvider.class);

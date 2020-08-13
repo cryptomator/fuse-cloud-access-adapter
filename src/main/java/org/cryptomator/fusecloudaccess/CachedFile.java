@@ -7,6 +7,7 @@ import com.google.common.collect.RangeSet;
 import com.google.common.collect.TreeRangeSet;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudItemType;
+import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.slf4j.Logger;
@@ -43,15 +44,15 @@ public class CachedFile implements Closeable {
 	private final FileChannel fc;
 	private final CloudProvider provider;
 	private final RangeSet<Long> populatedRanges;
-	private final Consumer<Path> onClose;
+	private final Consumer<CloudPath> onClose;
 	private final ConcurrentMap<Long, CachedFileHandle> handles;
-	private Path path;
+	private CloudPath path;
 	private Instant lastModified;
 	private boolean dirty;
 	private boolean deleted;
 
 	// visible for testing
-	CachedFile(Path path, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified, Consumer<Path> onClose) {
+	CachedFile(CloudPath path, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified, Consumer<CloudPath> onClose) {
 		this.fc = fc;
 		this.provider = provider;
 		this.populatedRanges = populatedRanges;
@@ -61,7 +62,7 @@ public class CachedFile implements Closeable {
 		this.lastModified = initialLastModified;
 	}
 
-	public static CachedFile create(Path path, Path tmpFilePath, CloudProvider provider, long initialSize, Instant initialLastModified, Consumer<Path> onClose) throws IOException {
+	public static CachedFile create(CloudPath path, Path tmpFilePath, CloudProvider provider, long initialSize, Instant initialLastModified, Consumer<CloudPath> onClose) throws IOException {
 		var fc = FileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE);
 		if (initialSize > 0) {
 			fc.write(ByteBuffer.allocateDirect(1), initialSize - 1); // grow file to initialSize
@@ -175,7 +176,7 @@ public class CachedFile implements Closeable {
 		this.deleted = true;
 	}
 
-	void updatePath(Path newPath) {
+	void updatePath(CloudPath newPath) {
 		this.path = newPath;
 	}
 

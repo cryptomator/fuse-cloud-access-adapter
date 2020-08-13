@@ -2,6 +2,7 @@ package org.cryptomator.fusecloudaccess;
 
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
+import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.junit.jupiter.api.Assertions;
@@ -29,16 +30,16 @@ import java.util.function.Consumer;
 
 public class CachedFileTest {
 
-	private Path file;
+	private CloudPath file;
 	private CloudProvider provider;
 	private FileChannel fileChannel;
 	private CachedFile cachedFile;
 	private RangeSet<Long> populatedRanges;
-	private Consumer<Path> onClose;
+	private Consumer<CloudPath> onClose;
 
 	@BeforeEach
 	public void setup() throws IOException {
-		this.file = Mockito.mock(Path.class, "/path/to/file");
+		this.file = Mockito.mock(CloudPath.class, "/path/to/file");
 		this.provider = Mockito.mock(CloudProvider.class);
 		this.fileChannel = Mockito.mock(FileChannel.class);
 		this.populatedRanges = Mockito.mock(RangeSet.class);

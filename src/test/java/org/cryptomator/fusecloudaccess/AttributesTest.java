@@ -3,6 +3,7 @@ package org.cryptomator.fusecloudaccess;
 import jnr.ffi.Runtime;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudItemType;
+import org.cryptomator.cloudaccess.api.CloudPath;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -13,7 +14,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 import ru.serce.jnrfuse.struct.FileStat;
 
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
@@ -22,7 +22,7 @@ import java.util.stream.Stream;
 
 public class AttributesTest {
 
-	private static final Path PATH = Path.of("path/to/resource");
+	private static final CloudPath PATH = CloudPath.of("path/to/resource");
 	private static final Runtime RUNTIME = Runtime.getSystemRuntime();
 
 	private CloudItemMetadata itemMetadata;
