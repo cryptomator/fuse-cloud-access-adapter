@@ -11,6 +11,9 @@ import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.cryptomator.cloudaccess.api.exceptions.AlreadyExistsException;
 import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
 import org.cryptomator.cloudaccess.api.exceptions.TypeMismatchException;
+import org.cryptomator.fusecloudaccess.locks.DataLock;
+import org.cryptomator.fusecloudaccess.locks.LockManager;
+import org.cryptomator.fusecloudaccess.locks.PathLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import ru.serce.jnrfuse.ErrorCodes;
@@ -45,17 +48,19 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	private final int timeoutMillis;
 	private final CachedFileFactory cachedFileFactory;
 	private final OpenDirFactory openDirFactory;
+	private final LockManager lockManager;
 
 	public CloudAccessFS(CloudProvider provider, int timeoutMillis) {
-		this(provider, timeoutMillis, new CachedFileFactory(provider), new OpenDirFactory(provider));
+		this(provider, timeoutMillis, new CachedFileFactory(provider), new OpenDirFactory(provider), new LockManager());
 	}
 
 	//Visible for testing
-	CloudAccessFS(CloudProvider provider, int timeoutMillis, CachedFileFactory cachedFileFactory, OpenDirFactory openDirFactory) {
+	CloudAccessFS(CloudProvider provider, int timeoutMillis, CachedFileFactory cachedFileFactory, OpenDirFactory openDirFactory, LockManager lockManager) {
 		this.provider = provider;
 		this.timeoutMillis = timeoutMillis;
 		this.cachedFileFactory = cachedFileFactory;
 		this.openDirFactory = openDirFactory;
+		this.lockManager = lockManager;
 	}
 
 	/**
@@ -99,193 +104,222 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int getattr(String path, FileStat stat) {
-		var cachedMetadata = cachedFileFactory.getCachedMetadata(CloudPath.of(path));
-		if (cachedMetadata.isPresent()) {
-			Attributes.copy(cachedMetadata.get(), stat);
-			return 0;
-		}
-		var returnCode = provider.itemMetadata(CloudPath.of(path)).thenApply(metadata -> {
-			Attributes.copy(metadata, stat);
-			return 0;
-		}).exceptionally(e -> {
-			if (e.getCause() instanceof NotFoundException) {
-				return -ErrorCodes.ENOENT();
-			} else {
-				LOG.error("getattr() failed", e);
-				return -ErrorCodes.EIO();
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+			 DataLock dataLock = pathLock.lockDataForReading()) {
+			var cachedMetadata = cachedFileFactory.getCachedMetadata(CloudPath.of(path));
+			if (cachedMetadata.isPresent()) {
+				Attributes.copy(cachedMetadata.get(), stat);
+				return 0;
 			}
-		});
-		return returnOrTimeout(returnCode);
+			var returnCode = provider.itemMetadata(CloudPath.of(path)).thenApply(metadata -> {
+				Attributes.copy(metadata, stat);
+				return 0;
+			}).exceptionally(e -> {
+				if (e.getCause() instanceof NotFoundException) {
+					return -ErrorCodes.ENOENT();
+				} else {
+					LOG.error("getattr() failed", e);
+					return -ErrorCodes.EIO();
+				}
+			});
+			return returnOrTimeout(returnCode);
+		}
 	}
 
 	@Override
 	public int opendir(String path, FuseFileInfo fi) {
-		var returnCode = provider.itemMetadata(CloudPath.of(path)).thenApply(metadata -> {
-			if (metadata.getItemType() == CloudItemType.FOLDER) {
-				long dirHandle = openDirFactory.open(CloudPath.of(path));
-				fi.fh.set(dirHandle);
-				return 0;
-			} else {
-				return -ErrorCodes.ENOTDIR();
-			}
-		}).exceptionally(e -> {
-			if (e.getCause() instanceof NotFoundException) {
-				return -ErrorCodes.ENOENT();
-			} else {
-				LOG.error("open() failed", e);
-				return -ErrorCodes.EIO();
-			}
-		});
-		return returnOrTimeout(returnCode);
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+			 DataLock dataLock = pathLock.lockDataForReading()) {
+			var returnCode = provider.itemMetadata(CloudPath.of(path)).thenApply(metadata -> {
+				if (metadata.getItemType() == CloudItemType.FOLDER) {
+					long dirHandle = openDirFactory.open(CloudPath.of(path));
+					fi.fh.set(dirHandle);
+					return 0;
+				} else {
+					return -ErrorCodes.ENOTDIR();
+				}
+			}).exceptionally(e -> {
+				if (e.getCause() instanceof NotFoundException) {
+					return -ErrorCodes.ENOENT();
+				} else {
+					LOG.error("open() failed", e);
+					return -ErrorCodes.EIO();
+				}
+			});
+			return returnOrTimeout(returnCode);
+		}
 	}
 
 	@Override
 	public int readdir(String path, Pointer buf, FuseFillDir filler, long offset, FuseFileInfo fi) {
-		if (offset > Integer.MAX_VALUE) {
-			LOG.error("readdir() only supported for up to 2^31 entries, but attempted to read from offset {}", offset);
-			return -ErrorCodes.EOVERFLOW();
-		}
-
-		var openDir = openDirFactory.get(fi.fh.get());
-		if (openDir.isEmpty()) {
-			return -ErrorCodes.EBADF();
-		}
-
-		var returnCode = openDir.get().list(buf, filler, (int) offset).exceptionally(e -> {
-			if (e instanceof NotFoundException) {
-				return -ErrorCodes.ENOENT();
-			} else if (e instanceof TypeMismatchException) {
-				return -ErrorCodes.ENOTDIR();
-			} else {
-				LOG.error("readdir() failed", e);
-				return -ErrorCodes.EIO();
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+			 DataLock dataLock = pathLock.lockDataForReading()) {
+			if (offset > Integer.MAX_VALUE) {
+				LOG.error("readdir() only supported for up to 2^31 entries, but attempted to read from offset {}", offset);
+				return -ErrorCodes.EOVERFLOW();
 			}
-		});
-		return returnOrTimeout(returnCode);
+
+			var openDir = openDirFactory.get(fi.fh.get());
+			if (openDir.isEmpty()) {
+				return -ErrorCodes.EBADF();
+			}
+
+			var returnCode = openDir.get().list(buf, filler, (int) offset).exceptionally(e -> {
+				if (e instanceof NotFoundException) {
+					return -ErrorCodes.ENOENT();
+				} else if (e instanceof TypeMismatchException) {
+					return -ErrorCodes.ENOTDIR();
+				} else {
+					LOG.error("readdir() failed", e);
+					return -ErrorCodes.EIO();
+				}
+			});
+			return returnOrTimeout(returnCode);
+		}
 	}
 
 	@Override
 	public int releasedir(String path, FuseFileInfo fi) {
-		openDirFactory.close(fi.fh.get());
-		return 0;
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+			 DataLock dataLock = pathLock.lockDataForReading()) {
+			openDirFactory.close(fi.fh.get());
+			return 0;
+		}
 	}
 
 	@Override
 	public int open(String path, FuseFileInfo fi) {
-		var returnCode = provider.itemMetadata(CloudPath.of(path)).thenApply(metadata -> {
-			final var type = metadata.getItemType();
-			if (type == CloudItemType.FILE) {
-				try {
-					var size = metadata.getSize().orElse(0l);
-					var lastModified = metadata.getLastModifiedDate().orElse(Instant.EPOCH);
-					var handle = cachedFileFactory.open(CloudPath.of(path), BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, lastModified);
-					fi.fh.set(handle.getId());
-					return 0;
-				} catch (IOException e) {
-					return -ErrorCodes.EIO();
-				}
-			} else if (type == CloudItemType.FOLDER) {
-				return -ErrorCodes.EISDIR();
-			} else {
-				LOG.error("Attempted to open() {}, which is not a file.", path);
-				return -ErrorCodes.EIO();
-			}
-		}).exceptionally(e -> {
-			if (e.getCause() instanceof NotFoundException) {
-				return -ErrorCodes.ENOENT();
-			} else {
-				LOG.error("open() failed", e);
-				return -ErrorCodes.EIO();
-			}
-		});
-		return returnOrTimeout(returnCode);
-	}
-
-	@Override
-	public int release(String path, FuseFileInfo fi) {
-		var returnCode = cachedFileFactory.close(fi.fh.get()).thenApply(ignored -> 0).exceptionally(e -> {
-			LOG.error("release() failed", e);
-			return -ErrorCodes.EIO();
-		});
-		return returnOrTimeout(returnCode);
-	}
-
-	@Override
-	public int rename(String oldpath, String newpath) {
-		var returnCode = provider.move(CloudPath.of(oldpath), CloudPath.of(newpath), true)
-				.thenApply(p -> {
-					cachedFileFactory.moved(CloudPath.of(oldpath), CloudPath.of(newpath));
-					return 0;
-				})
-				.exceptionally(completionThrowable -> {
-					var e = completionThrowable.getCause();
-					if (e instanceof NotFoundException) {
-						return -ErrorCodes.ENOENT();
-					} else if (e instanceof AlreadyExistsException) {
-						return -ErrorCodes.EEXIST();
-					} else {
-						LOG.error("rename() failed", e);
-						return -ErrorCodes.EIO();
-					}
-				});
-		return returnOrTimeout(returnCode);
-	}
-
-	@Override
-	public int mkdir(String path, long mode) {
-		var returnCode = provider.createFolder(CloudPath.of(path))
-				.thenApply(p -> 0)
-				.exceptionally(completionThrowable -> {
-					var e = completionThrowable.getCause();
-					if (e instanceof AlreadyExistsException) {
-						return -ErrorCodes.EEXIST();
-					} else {
-						LOG.error("mkdir() failed", e);
-						return -ErrorCodes.EIO();
-					}
-				});
-		return returnOrTimeout(returnCode);
-	}
-
-	@Override
-	public int create(String rawPath, long mode, FuseFileInfo fi) {
-		final var path = CloudPath.of(rawPath);
-		var returnCode = provider
-				.write(path, false, InputStream.nullInputStream(), ProgressListener.NO_PROGRESS_AWARE)
-				.handle((metadata, exception) -> {
-					if (exception == null) {
-						// no exception means: 0-byte file successfully created
-						return CompletableFuture.completedFuture(metadata);
-					} else if (exception instanceof AlreadyExistsException) {
-						// in case of an already existing file, return the existing file's metadata
-						return provider.itemMetadata(path);
-					} else {
-						return CompletableFuture.<CloudItemMetadata>failedFuture(exception);
-					}
-				})
-				.thenCompose(Function.identity())
-				.thenApply(metadata -> {
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+			 DataLock dataLock = pathLock.lockDataForReading()) {
+			var returnCode = provider.itemMetadata(CloudPath.of(path)).thenApply(metadata -> {
+				final var type = metadata.getItemType();
+				if (type == CloudItemType.FILE) {
 					try {
 						var size = metadata.getSize().orElse(0l);
 						var lastModified = metadata.getLastModifiedDate().orElse(Instant.EPOCH);
-						var handle = cachedFileFactory.open(path, BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, lastModified);
+						var handle = cachedFileFactory.open(CloudPath.of(path), BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, lastModified);
 						fi.fh.set(handle.getId());
 						return 0;
 					} catch (IOException e) {
 						return -ErrorCodes.EIO();
 					}
-				})
-				.exceptionally(e -> {
-					if (e.getCause() instanceof NotFoundException) {
-						return -ErrorCodes.ENOENT();
-					} else if (e.getCause() instanceof TypeMismatchException) {
-						return -ErrorCodes.EISDIR();
-					} else {
-						LOG.error("create() failed", e);
-						return -ErrorCodes.EIO();
-					}
-				});
-		return returnOrTimeout(returnCode);
+				} else if (type == CloudItemType.FOLDER) {
+					return -ErrorCodes.EISDIR();
+				} else {
+					LOG.error("Attempted to open() {}, which is not a file.", path);
+					return -ErrorCodes.EIO();
+				}
+			}).exceptionally(e -> {
+				if (e.getCause() instanceof NotFoundException) {
+					return -ErrorCodes.ENOENT();
+				} else {
+					LOG.error("open() failed", e);
+					return -ErrorCodes.EIO();
+				}
+			});
+			return returnOrTimeout(returnCode);
+		}
+	}
+
+	@Override
+	public int release(String path, FuseFileInfo fi) {
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+			 DataLock dataLock = pathLock.lockDataForReading()) {
+			var returnCode = cachedFileFactory.close(fi.fh.get()).thenApply(ignored -> 0).exceptionally(e -> {
+				LOG.error("release() failed", e);
+				return -ErrorCodes.EIO();
+			});
+			return returnOrTimeout(returnCode);
+		}
+	}
+
+	@Override
+	public int rename(String oldpath, String newpath) {
+		try (PathLock oldPathLock = lockManager.createPathLock(oldpath).forWriting();
+			 DataLock oldDataLock = oldPathLock.lockDataForWriting();
+			 PathLock newPathLock = lockManager.createPathLock(newpath).forWriting();
+			 DataLock newDataLock = newPathLock.lockDataForWriting()) {
+			var returnCode = provider.move(CloudPath.of(oldpath), CloudPath.of(newpath), true)
+					.thenApply(p -> {
+						cachedFileFactory.moved(CloudPath.of(oldpath), CloudPath.of(newpath));
+						return 0;
+					})
+					.exceptionally(completionThrowable -> {
+						var e = completionThrowable.getCause();
+						if (e instanceof NotFoundException) {
+							return -ErrorCodes.ENOENT();
+						} else if (e instanceof AlreadyExistsException) {
+							return -ErrorCodes.EEXIST();
+						} else {
+							LOG.error("rename() failed", e);
+							return -ErrorCodes.EIO();
+						}
+					});
+			return returnOrTimeout(returnCode);
+		}
+	}
+
+	@Override
+	public int mkdir(String path, long mode) {
+		try (PathLock pathLock = lockManager.createPathLock(path).forWriting();
+			 DataLock dataLock = pathLock.lockDataForWriting()) {
+			var returnCode = provider.createFolder(CloudPath.of(path))
+					.thenApply(p -> 0)
+					.exceptionally(completionThrowable -> {
+						var e = completionThrowable.getCause();
+						if (e instanceof AlreadyExistsException) {
+							return -ErrorCodes.EEXIST();
+						} else {
+							LOG.error("mkdir() failed", e);
+							return -ErrorCodes.EIO();
+						}
+					});
+			return returnOrTimeout(returnCode);
+		}
+	}
+
+	@Override
+	public int create(String path, long mode, FuseFileInfo fi) {
+		try (PathLock pathLock = lockManager.createPathLock(path).forWriting();
+			 DataLock dataLock = pathLock.lockDataForWriting()) {
+			final var file = CloudPath.of(path);
+			var returnCode = provider
+					.write(file, false, InputStream.nullInputStream(), ProgressListener.NO_PROGRESS_AWARE)
+					.handle((metadata, exception) -> {
+						if (exception == null) {
+							// no exception means: 0-byte file successfully created
+							return CompletableFuture.completedFuture(metadata);
+						} else if (exception instanceof AlreadyExistsException) {
+							// in case of an already existing file, return the existing file's metadata
+							return provider.itemMetadata(file);
+						} else {
+							return CompletableFuture.<CloudItemMetadata>failedFuture(exception);
+						}
+					})
+					.thenCompose(Function.identity())
+					.thenApply(metadata -> {
+						try {
+							var size = metadata.getSize().orElse(0l);
+							var lastModified = metadata.getLastModifiedDate().orElse(Instant.EPOCH);
+							var handle = cachedFileFactory.open(file, BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, lastModified);
+							fi.fh.set(handle.getId());
+							return 0;
+						} catch (IOException e) {
+							return -ErrorCodes.EIO();
+						}
+					})
+					.exceptionally(e -> {
+						if (e.getCause() instanceof NotFoundException) {
+							return -ErrorCodes.ENOENT();
+						} else if (e.getCause() instanceof TypeMismatchException) {
+							return -ErrorCodes.EISDIR();
+						} else {
+							LOG.error("create() failed", e);
+							return -ErrorCodes.EIO();
+						}
+					});
+			return returnOrTimeout(returnCode);
+		}
 	}
 
 	@Override
@@ -306,89 +340,103 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	// visible for testing
 	int deleteResource(CloudPath path, String msgOnError) {
-		var returnCode = provider.delete(path)
-				.thenApply(ignored -> {
-					cachedFileFactory.delete(path);
-					return 0;
-				})
-				.exceptionally(completionThrowable -> {
-					final var e = completionThrowable.getCause();
-					if (e instanceof NotFoundException) {
-						return -ErrorCodes.ENOENT();
-					} else {
-						LOG.error(msgOnError, e);
-						return -ErrorCodes.EIO();
-					}
-				});
-		return returnOrTimeout(returnCode);
+		try (PathLock pathLock = lockManager.createPathLock(path.toString()).forWriting();
+			 DataLock dataLock = pathLock.lockDataForWriting()) {
+			var returnCode = provider.delete(path)
+					.thenApply(ignored -> {
+						cachedFileFactory.delete(path);
+						return 0;
+					})
+					.exceptionally(completionThrowable -> {
+						final var e = completionThrowable.getCause();
+						if (e instanceof NotFoundException) {
+							return -ErrorCodes.ENOENT();
+						} else {
+							LOG.error(msgOnError, e);
+							return -ErrorCodes.EIO();
+						}
+					});
+			return returnOrTimeout(returnCode);
+		}
 	}
 
 	@Override
 	public int read(String path, Pointer buf, long size, long offset, FuseFileInfo fi) {
-		var openFile = cachedFileFactory.get(fi.fh.get());
-		if (openFile.isEmpty()) {
-			return -ErrorCodes.EBADF();
-		}
-		var returnCode = openFile.get().read(buf, offset, size).exceptionally(e -> {
-			if (e instanceof NotFoundException) {
-				return -ErrorCodes.ENOENT();
-			} else if (e instanceof EOFException) {
-				return 0; // offset was at or beyond EOF
-			} else {
-				LOG.error("read() failed", e);
-				return -ErrorCodes.EIO();
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+			 DataLock dataLock = pathLock.lockDataForReading()) {
+			var openFile = cachedFileFactory.get(fi.fh.get());
+			if (openFile.isEmpty()) {
+				return -ErrorCodes.EBADF();
 			}
-		});
-		return returnOrTimeout(returnCode);
+			var returnCode = openFile.get().read(buf, offset, size).exceptionally(e -> {
+				if (e instanceof NotFoundException) {
+					return -ErrorCodes.ENOENT();
+				} else if (e instanceof EOFException) {
+					return 0; // offset was at or beyond EOF
+				} else {
+					LOG.error("read() failed", e);
+					return -ErrorCodes.EIO();
+				}
+			});
+			return returnOrTimeout(returnCode);
+		}
 	}
 
 	@Override
 	public int write(String path, Pointer buf, long size, long offset, FuseFileInfo fi) {
-		var openFile = cachedFileFactory.get(fi.fh.get());
-		if (openFile.isEmpty()) {
-			return -ErrorCodes.EBADF();
-		}
-		var returnCode = openFile.get().write(buf, offset, size).exceptionally(e -> {
-			if (e instanceof NotFoundException) {
-				return -ErrorCodes.ENOENT();
-			} else {
-				LOG.error("write() failed", e);
-				return -ErrorCodes.EIO();
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+			 DataLock dataLock = pathLock.lockDataForWriting()) {
+			var openFile = cachedFileFactory.get(fi.fh.get());
+			if (openFile.isEmpty()) {
+				return -ErrorCodes.EBADF();
 			}
-		});
-		return returnOrTimeout(returnCode);
+			var returnCode = openFile.get().write(buf, offset, size).exceptionally(e -> {
+				if (e instanceof NotFoundException) {
+					return -ErrorCodes.ENOENT();
+				} else {
+					LOG.error("write() failed", e);
+					return -ErrorCodes.EIO();
+				}
+			});
+			return returnOrTimeout(returnCode);
+		}
 	}
 
 	@Override
 	public int truncate(String path, long size) {
-		var file = CloudPath.of(path);
-		LOG.info("TRUNCATE {} to {}", path, size);
-		var returnCode = provider.read(file, 0, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
-			// TODO optimize tmp file path
-			try (var ch = FileChannel.open(Files.createTempFile("foo", "bar"), StandardOpenOption.READ, StandardOpenOption.WRITE)) {
-				long copied = ByteStreams.copy(in, Channels.newOutputStream(ch));
-				if (copied < size) {
-					// TODO append
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+			 DataLock dataLock = pathLock.lockDataForWriting()) {
+			var file = CloudPath.of(path);
+			var returnCode = provider.read(file, 0, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
+				// TODO optimize tmp file path
+				try (var ch = FileChannel.open(Files.createTempFile("foo", "bar"), StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+					long copied = ByteStreams.copy(in, Channels.newOutputStream(ch));
+					if (copied < size) {
+						// TODO append
+					}
+					ch.position(0);
+					return provider.write(file, true, Channels.newInputStream(ch), ProgressListener.NO_PROGRESS_AWARE).thenApply(ignored -> 0);
+				} catch (IOException e) {
+					return CompletableFuture.failedFuture(e);
 				}
-				ch.position(0);
-				return provider.write(file, true, Channels.newInputStream(ch), ProgressListener.NO_PROGRESS_AWARE).thenApply(ignored -> 0);
-			} catch (IOException e) {
-				return CompletableFuture.failedFuture(e);
-			}
-		});
-		return returnOrTimeout(returnCode);
+			});
+			return returnOrTimeout(returnCode);
+		}
 	}
 
 	@Override
 	public int ftruncate(String path, long size, FuseFileInfo fi) {
-		var handle = cachedFileFactory.get(fi.fh.get());
-		if (handle.isEmpty()) {
-			return -ErrorCodes.EBADF();
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+			 DataLock dataLock = pathLock.lockDataForWriting()) {
+			var handle = cachedFileFactory.get(fi.fh.get());
+			if (handle.isEmpty()) {
+				return -ErrorCodes.EBADF();
+			}
+			var returnCode = handle.get().truncate(size).thenApply(ignored -> 0).exceptionally(e -> {
+				LOG.error("ftruncate() failed", e);
+				return -ErrorCodes.EIO();
+			});
+			return returnOrTimeout(returnCode);
 		}
-		var returnCode = handle.get().truncate(size).thenApply(ignored -> 0).exceptionally(e -> {
-			LOG.error("ftruncate() failed", e);
-			return -ErrorCodes.EIO();
-		});
-		return returnOrTimeout(returnCode);
 	}
 }

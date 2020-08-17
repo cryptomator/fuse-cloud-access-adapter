@@ -11,6 +11,11 @@ import org.cryptomator.cloudaccess.api.exceptions.AlreadyExistsException;
 import org.cryptomator.cloudaccess.api.exceptions.CloudProviderException;
 import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
 import org.cryptomator.cloudaccess.api.exceptions.TypeMismatchException;
+import org.cryptomator.fusecloudaccess.locks.DataLock;
+import org.cryptomator.fusecloudaccess.locks.LockManager;
+import org.cryptomator.fusecloudaccess.locks.PathLock;
+import org.cryptomator.fusecloudaccess.locks.PathLockBuilder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,6 +49,10 @@ public class CloudAccessFSTest {
 	private CloudProvider provider;
 	private CachedFileFactory fileFactory;
 	private OpenDirFactory dirFactory;
+	private LockManager lockManager;
+	private PathLockBuilder pathLockBuilder;
+	private PathLock pathLock;
+	private DataLock dataLock;
 
 	@BeforeAll
 	public static void prepare() {
@@ -58,7 +67,17 @@ public class CloudAccessFSTest {
 		provider = Mockito.mock(CloudProvider.class);
 		fileFactory = Mockito.mock(CachedFileFactory.class);
 		dirFactory = Mockito.mock(OpenDirFactory.class);
-		cloudFs = new CloudAccessFS(provider, CloudAccessFSTest.TIMEOUT, fileFactory, dirFactory);
+		lockManager = Mockito.mock(LockManager.class);
+		cloudFs = new CloudAccessFS(provider, CloudAccessFSTest.TIMEOUT, fileFactory, dirFactory, lockManager);
+
+		pathLockBuilder = Mockito.mock(PathLockBuilder.class);
+		pathLock = Mockito.mock(PathLock.class);
+		dataLock = Mockito.mock(DataLock.class);
+		Mockito.when(lockManager.createPathLock(PATH.toString())).thenReturn(pathLockBuilder);
+		Mockito.when(pathLockBuilder.forReading()).thenReturn(pathLock);
+		Mockito.when(pathLockBuilder.forWriting()).thenReturn(pathLock);
+		Mockito.when(pathLock.lockDataForReading()).thenReturn(dataLock);
+		Mockito.when(pathLock.lockDataForWriting()).thenReturn(dataLock);
 	}
 
 	@DisplayName("test returnOrTimeout() returns expected result on regular execution")
@@ -103,6 +122,15 @@ public class CloudAccessFSTest {
 		@BeforeEach
 		public void setup() {
 			fileStat = new FileStat(RUNTIME);
+		}
+
+		@AfterEach
+		public void tearDown() {
+			Mockito.verify(lockManager).createPathLock(PATH.toString());
+			Mockito.verify(pathLockBuilder).forReading();
+			Mockito.verify(pathLock).lockDataForReading();
+			Mockito.verify(pathLock).close();
+			Mockito.verify(dataLock).close();
 		}
 
 		@DisplayName("getattr() returns 0 on success")
@@ -150,6 +178,15 @@ public class CloudAccessFSTest {
 		@BeforeEach
 		public void setup() {
 			fi = TestFileInfo.create();
+		}
+
+		@AfterEach
+		public void tearDown() {
+			Mockito.verify(lockManager).createPathLock(PATH.toString());
+			Mockito.verify(pathLockBuilder).forReading();
+			Mockito.verify(pathLock).lockDataForReading();
+			Mockito.verify(pathLock).close();
+			Mockito.verify(dataLock).close();
 		}
 
 		@DisplayName("opendir() returns 0 on success and sets the file handle")
@@ -216,6 +253,15 @@ public class CloudAccessFSTest {
 			buf = Mockito.mock(Pointer.class);
 			fi = TestFileInfo.create();
 			dir = Mockito.mock(OpenDir.class);
+		}
+
+		@AfterEach
+		public void tearDown() {
+			Mockito.verify(lockManager).createPathLock(PATH.toString());
+			Mockito.verify(pathLockBuilder).forReading();
+			Mockito.verify(pathLock).lockDataForReading();
+			Mockito.verify(pathLock).close();
+			Mockito.verify(dataLock).close();
 		}
 
 		@DisplayName("Successful readdir() returns 0")
@@ -301,6 +347,15 @@ public class CloudAccessFSTest {
 			fi.fh.set(0L);
 		}
 
+		@AfterEach
+		public void tearDown() {
+			Mockito.verify(lockManager).createPathLock(PATH.toString());
+			Mockito.verify(pathLockBuilder).forReading();
+			Mockito.verify(pathLock).lockDataForReading();
+			Mockito.verify(pathLock).close();
+			Mockito.verify(dataLock).close();
+		}
+
 		@DisplayName("open() returns 0 in success and writes the handle to field FileInfo.fh")
 		@Test
 		public void testSuccessfulOpenReturnsZeroAndStoresHandle() throws IOException {
@@ -379,6 +434,15 @@ public class CloudAccessFSTest {
 			buf = Mockito.mock(Pointer.class);
 		}
 
+		@AfterEach
+		public void tearDown() {
+			Mockito.verify(lockManager).createPathLock(PATH.toString());
+			Mockito.verify(pathLockBuilder).forReading();
+			Mockito.verify(pathLock).lockDataForReading();
+			Mockito.verify(pathLock).close();
+			Mockito.verify(dataLock).close();
+		}
+
 		@DisplayName("read() returns 0 on success")
 		@Test
 		public void testSuccessfulReadReturnsZero() {
@@ -439,6 +503,15 @@ public class CloudAccessFSTest {
 			buf = Mockito.mock(Pointer.class);
 		}
 
+		@AfterEach
+		public void tearDown() {
+			Mockito.verify(lockManager).createPathLock(PATH.toString());
+			Mockito.verify(pathLockBuilder).forReading();
+			Mockito.verify(pathLock).lockDataForWriting();
+			Mockito.verify(pathLock).close();
+			Mockito.verify(dataLock).close();
+		}
+
 		@DisplayName("write() returns 0 on success")
 		@Test
 		public void testSuccessfulReadReturnsZero() {
@@ -490,6 +563,34 @@ public class CloudAccessFSTest {
 
 		private CloudPath oldPath = CloudPath.of("location/number/one");
 		private CloudPath newPath = CloudPath.of("location/number/two");
+		private PathLockBuilder oldPathLockBuilder = Mockito.mock(PathLockBuilder.class);
+		private PathLockBuilder newPathLockBuilder = Mockito.mock(PathLockBuilder.class);
+		private PathLock oldPathLock = Mockito.mock(PathLock.class);
+		private PathLock newPathLock = Mockito.mock(PathLock.class);
+		private DataLock oldDataLock = Mockito.mock(DataLock.class);
+		private DataLock newDataLock = Mockito.mock(DataLock.class);
+
+		@BeforeEach
+		public void setup() {
+			Mockito.when(lockManager.createPathLock(oldPath.toString())).thenReturn(oldPathLockBuilder);
+			Mockito.when(lockManager.createPathLock(newPath.toString())).thenReturn(newPathLockBuilder);
+			Mockito.when(oldPathLockBuilder.forWriting()).thenReturn(oldPathLock);
+			Mockito.when(newPathLockBuilder.forWriting()).thenReturn(newPathLock);
+			Mockito.when(oldPathLock.lockDataForWriting()).thenReturn(oldDataLock);
+			Mockito.when(newPathLock.lockDataForWriting()).thenReturn(newDataLock);
+		}
+
+		@AfterEach
+		public void tearDown() {
+			Mockito.verify(lockManager).createPathLock(oldPath.toString());
+			Mockito.verify(lockManager).createPathLock(newPath.toString());
+			Mockito.verify(oldPathLockBuilder).forWriting();
+			Mockito.verify(newPathLockBuilder).forWriting();
+			Mockito.verify(oldPathLock).lockDataForWriting();
+			Mockito.verify(newPathLock).lockDataForWriting();
+			Mockito.verify(oldDataLock).close();
+			Mockito.verify(newDataLock).close();
+		}
 
 		@DisplayName("rename(...) returns zero on success")
 		@Test
@@ -536,6 +637,15 @@ public class CloudAccessFSTest {
 
 	@Nested
 	class MkdirTest {
+
+		@AfterEach
+		public void tearDown() {
+			Mockito.verify(lockManager).createPathLock(PATH.toString());
+			Mockito.verify(pathLockBuilder).forWriting();
+			Mockito.verify(pathLock).lockDataForWriting();
+			Mockito.verify(pathLock).close();
+			Mockito.verify(dataLock).close();
+		}
 
 		@DisplayName("mkdir(...) returns zero on success")
 		@Test
@@ -585,6 +695,15 @@ public class CloudAccessFSTest {
 			this.fi = TestFileInfo.create();
 			this.openFlags = Set.of(OpenFlags.O_CREAT, OpenFlags.O_RDWR);
 			this.mode = BitMaskEnumUtil.setToBitMask(openFlags);
+		}
+
+		@AfterEach
+		public void tearDown() {
+			Mockito.verify(lockManager).createPathLock(PATH.toString());
+			Mockito.verify(pathLockBuilder).forWriting();
+			Mockito.verify(pathLock).lockDataForWriting();
+			Mockito.verify(pathLock).close();
+			Mockito.verify(dataLock).close();
 		}
 
 		@DisplayName("create(...) in not existing case returns 0 on success and opens file")
@@ -660,8 +779,37 @@ public class CloudAccessFSTest {
 		}
 	}
 
+	@Test
+	public void testRmdirCallsDeleteResource() {
+		var mockedCloudFs = Mockito.mock(CloudAccessFS.class);
+		Mockito.doCallRealMethod().when(mockedCloudFs).rmdir(PATH.toString());
+
+		mockedCloudFs.rmdir(PATH.toString());
+
+		Mockito.verify(mockedCloudFs).deleteResource(PATH, "rmdir() failed");
+	}
+
+	@Test
+	public void testUnlinkCallsDeleteResource() {
+		var mockedCloudFs = Mockito.mock(CloudAccessFS.class);
+		Mockito.doCallRealMethod().when(mockedCloudFs).unlink(PATH.toString());
+
+		mockedCloudFs.unlink(PATH.toString());
+
+		Mockito.verify(mockedCloudFs).deleteResource(PATH, "unlink() failed");
+	}
+
 	@Nested
 	class DeleteResourceTest {
+
+		@AfterEach
+		public void tearDown() {
+			Mockito.verify(lockManager).createPathLock(PATH.toString());
+			Mockito.verify(pathLockBuilder).forWriting();
+			Mockito.verify(pathLock).lockDataForWriting();
+			Mockito.verify(pathLock).close();
+			Mockito.verify(dataLock).close();
+		}
 
 		@DisplayName("deleteResource(...) returns 0 on success")
 		@Test
@@ -696,26 +844,6 @@ public class CloudAccessFSTest {
 			var actualResult = cloudFs.deleteResource(PATH, "testCall() failed");
 
 			Assertions.assertEquals(-ErrorCodes.EIO(), actualResult);
-		}
-
-		@Test
-		public void testRmdirCallsDeleteResource() {
-			var mockedCloudFs = Mockito.mock(CloudAccessFS.class);
-			Mockito.doCallRealMethod().when(mockedCloudFs).rmdir(PATH.toString());
-
-			mockedCloudFs.rmdir(PATH.toString());
-
-			Mockito.verify(mockedCloudFs).deleteResource(PATH, "rmdir() failed");
-		}
-
-		@Test
-		public void testUnlinkCallsDeleteResource() {
-			var mockedCloudFs = Mockito.mock(CloudAccessFS.class);
-			Mockito.doCallRealMethod().when(mockedCloudFs).unlink(PATH.toString());
-
-			mockedCloudFs.unlink(PATH.toString());
-
-			Mockito.verify(mockedCloudFs).deleteResource(PATH, "unlink() failed");
 		}
 
 	}
