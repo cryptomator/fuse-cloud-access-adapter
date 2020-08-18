@@ -63,15 +63,7 @@ class CachedFileFactory {
 	private CachedFile createCachedFile(CloudPath path, long initialSize, Instant lastModified) {
 		try {
 			var tmpFile = cacheDir.resolve(UUID.randomUUID().toString());
-			return CachedFile.create(path, tmpFile, provider, initialSize, lastModified, p -> {
-				try {
-					Files.deleteIfExists(tmpFile);
-				} catch (IOException e) {
-					LOG.warn("Failed to clean up cached data {}", tmpFile);
-				} finally {
-					cachedFiles.remove(p);
-				}
-			});
+			return CachedFile.create(path, tmpFile, provider, initialSize, lastModified, cachedFiles::remove);
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}
@@ -112,7 +104,7 @@ class CachedFileFactory {
 			if (cachedFile != null) {
 				cachedFile.updatePath(newPath);
 			}
-			return cachedFile; // removes entry from map if
+			return cachedFile; // removes entry from map if null
 		});
 	}
 

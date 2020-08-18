@@ -18,8 +18,10 @@ import org.mockito.Mockito;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.spi.FileSystemProvider;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
@@ -31,21 +33,29 @@ import java.util.function.Consumer;
 public class CachedFileTest {
 
 	private CloudPath file;
+	private Path tmpFile;
+	private FileSystem tmpFileSystem;
+	private FileSystemProvider tmpFileSystemProvider;
 	private CloudProvider provider;
 	private FileChannel fileChannel;
 	private CachedFile cachedFile;
 	private RangeSet<Long> populatedRanges;
-	private Consumer<CloudPath> onClose;
+	private Consumer<CloudPath> onRelease;
 
 	@BeforeEach
 	public void setup() throws IOException {
 		this.file = Mockito.mock(CloudPath.class, "/path/to/file");
+		this.tmpFile = Mockito.mock(Path.class, "/tmp/cache.file");
+		this.tmpFileSystem = Mockito.mock(FileSystem.class);
+		this.tmpFileSystemProvider = Mockito.mock(FileSystemProvider.class);
 		this.provider = Mockito.mock(CloudProvider.class);
 		this.fileChannel = Mockito.mock(FileChannel.class);
 		this.populatedRanges = Mockito.mock(RangeSet.class);
-		this.onClose = Mockito.mock(Consumer.class);
-		this.cachedFile = new CachedFile(file, fileChannel, provider, populatedRanges, Instant.EPOCH, onClose);
+		this.onRelease = Mockito.mock(Consumer.class);
+		this.cachedFile = new CachedFile(file, tmpFile, fileChannel, provider, populatedRanges, Instant.EPOCH, onRelease);
 		Mockito.when(fileChannel.size()).thenReturn(100l);
+		Mockito.when(tmpFile.getFileSystem()).thenReturn(tmpFileSystem);
+		Mockito.when(tmpFileSystem.provider()).thenReturn(tmpFileSystemProvider);
 	}
 
 	@DisplayName("create new cached file")
@@ -53,7 +63,7 @@ public class CachedFileTest {
 	@ValueSource(longs = {0l, 1l, 42l})
 	public void testCreate(long size, @TempDir Path tmpDir) throws IOException {
 		Path tmpFile = tmpDir.resolve("cache.file");
-		try (var cachedFile = CachedFile.create(file, tmpFile, provider, size, Instant.EPOCH, onClose)) {
+		try (var cachedFile = CachedFile.create(file, tmpFile, provider, size, Instant.EPOCH, onRelease)) {
 			Assertions.assertNotNull(cachedFile);
 			Assertions.assertEquals(size, Files.size(tmpFile));
 		}
@@ -194,7 +204,8 @@ public class CachedFileTest {
 		Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 		Mockito.verify(provider).write(Mockito.eq(file), Mockito.eq(true), Mockito.any(), Mockito.any());
 		Mockito.verify(fileChannel).close();
-		Mockito.verify(onClose).accept(Mockito.eq(file));
+		Mockito.verify(onRelease).accept(file);
+		Mockito.verify(tmpFileSystemProvider).delete(tmpFile);
 	}
 
 	@Test
@@ -209,7 +220,8 @@ public class CachedFileTest {
 		Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 		Mockito.verify(provider, Mockito.never()).write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.any());
 		Mockito.verify(fileChannel).close();
-		Mockito.verify(onClose).accept(Mockito.eq(file));
+		Mockito.verify(onRelease).accept(file);
+		Mockito.verify(tmpFileSystemProvider).delete(tmpFile);
 	}
 
 	@Test
@@ -226,7 +238,8 @@ public class CachedFileTest {
 		Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 		Mockito.verify(provider, Mockito.never()).write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.any());
 		Mockito.verify(fileChannel, Mockito.never()).close();
-		Mockito.verify(onClose, Mockito.never()).accept(Mockito.any());
+		Mockito.verify(onRelease, Mockito.never()).accept(Mockito.any());
+		Mockito.verify(tmpFileSystemProvider, Mockito.never()).delete(tmpFile);
 	}
 
 }

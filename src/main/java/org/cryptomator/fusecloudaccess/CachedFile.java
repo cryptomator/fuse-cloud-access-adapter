@@ -21,76 +21,76 @@ import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.WritableByteChannel;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
-import static java.nio.file.StandardOpenOption.CREATE_NEW;
-import static java.nio.file.StandardOpenOption.READ;
-import static java.nio.file.StandardOpenOption.SPARSE;
-import static java.nio.file.StandardOpenOption.WRITE;
+import static java.nio.file.StandardOpenOption.*;
 
 public class CachedFile implements Closeable {
 
 	private static final Logger LOG = LoggerFactory.getLogger(CachedFile.class);
 	private static final AtomicLong FILE_HANDLE_GEN = new AtomicLong();
 
+	private final Path tmpFilePath;
 	private final FileChannel fc;
 	private final CloudProvider provider;
 	private final RangeSet<Long> populatedRanges;
-	private final Consumer<CloudPath> onClose;
-	private final ConcurrentMap<Long, CachedFileHandle> handles;
+	private final Consumer<CloudPath> onReleased;
+	private final Map<Long, CachedFileHandle> handles;
 	private CloudPath path;
 	private Instant lastModified;
 	private boolean dirty;
 	private boolean deleted;
 
 	// visible for testing
-	CachedFile(CloudPath path, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified, Consumer<CloudPath> onClose) {
+	CachedFile(CloudPath path, Path tmpFilePath, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified, Consumer<CloudPath> onReleased) {
+		this.path = path;
+		this.tmpFilePath = tmpFilePath;
 		this.fc = fc;
 		this.provider = provider;
 		this.populatedRanges = populatedRanges;
-		this.onClose = onClose;
-		this.handles = new ConcurrentHashMap<>();
-		this.path = path;
+		this.onReleased = onReleased;
+		this.handles = new HashMap<>();
 		this.lastModified = initialLastModified;
 	}
 
-	public static CachedFile create(CloudPath path, Path tmpFilePath, CloudProvider provider, long initialSize, Instant initialLastModified, Consumer<CloudPath> onClose) throws IOException {
+	public static CachedFile create(CloudPath path, Path tmpFilePath, CloudProvider provider, long initialSize, Instant initialLastModified, Consumer<CloudPath> onReleased) throws IOException {
 		var fc = FileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE);
 		if (initialSize > 0) {
 			fc.write(ByteBuffer.allocateDirect(1), initialSize - 1); // grow file to initialSize
 		}
-		return new CachedFile(path, fc, provider, TreeRangeSet.create(), initialLastModified, onClose);
+		return new CachedFile(path, tmpFilePath, fc, provider, TreeRangeSet.create(), initialLastModified, onReleased);
 	}
 
 	@Override
 	public void close() {
 		try {
 			fc.close();
+			Files.delete(tmpFilePath);
 		} catch (IOException e) {
-			LOG.error("Failed to close tmp file channel.", e);
-		} finally {
-			onClose.accept(path);
+			LOG.error("Failed to close tmp file " + tmpFilePath, e);
 		}
 	}
 
-	public CachedFileHandle openFileHandle() {
+	public synchronized CachedFileHandle openFileHandle() {
 		var handleId = FILE_HANDLE_GEN.incrementAndGet();
 		var handle = new CachedFileHandle(this, handleId);
 		handles.put(handleId, handle);
 		return handle;
 	}
 
-	public CompletionStage<Void> releaseFileHandle(long fileHandle) {
+	public synchronized CompletionStage<Void> releaseFileHandle(long fileHandle) {
 		handles.remove(fileHandle);
 		if (handles.isEmpty()) {
+			onReleased.accept(path);
 			if (deleted || !dirty) {
 				close();
 				return CompletableFuture.completedFuture(null);
