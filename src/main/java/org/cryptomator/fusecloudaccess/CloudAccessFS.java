@@ -27,6 +27,7 @@ import java.io.InputStream;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
@@ -43,18 +44,18 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	private final CloudProvider provider;
 	private final int timeoutMillis;
-	private final CachedFileFactory cachedFileFactory;
+	private final OpenFileFactory openFileFactory;
 	private final OpenDirFactory openDirFactory;
 
-	public CloudAccessFS(CloudProvider provider, int timeoutMillis) {
-		this(provider, timeoutMillis, new CachedFileFactory(provider), new OpenDirFactory(provider));
+	public CloudAccessFS(CloudProvider provider, Path cacheDir, int timeoutMillis) {
+		this(provider, timeoutMillis, new OpenFileFactory(provider, cacheDir), new OpenDirFactory(provider));
 	}
 
 	//Visible for testing
-	CloudAccessFS(CloudProvider provider, int timeoutMillis, CachedFileFactory cachedFileFactory, OpenDirFactory openDirFactory) {
+	CloudAccessFS(CloudProvider provider, int timeoutMillis, OpenFileFactory openFileFactory, OpenDirFactory openDirFactory) {
 		this.provider = provider;
 		this.timeoutMillis = timeoutMillis;
-		this.cachedFileFactory = cachedFileFactory;
+		this.openFileFactory = openFileFactory;
 		this.openDirFactory = openDirFactory;
 	}
 
@@ -99,7 +100,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int getattr(String path, FileStat stat) {
-		var cachedMetadata = cachedFileFactory.getCachedMetadata(CloudPath.of(path));
+		var cachedMetadata = openFileFactory.getCachedMetadata(CloudPath.of(path));
 		if (cachedMetadata.isPresent()) {
 			Attributes.copy(cachedMetadata.get(), stat);
 			return 0;
@@ -178,7 +179,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 				try {
 					var size = metadata.getSize().orElse(0l);
 					var lastModified = metadata.getLastModifiedDate().orElse(Instant.EPOCH);
-					var handle = cachedFileFactory.open(CloudPath.of(path), BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, lastModified);
+					var handle = openFileFactory.open(CloudPath.of(path), BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, lastModified);
 					fi.fh.set(handle.getId());
 					return 0;
 				} catch (IOException e) {
@@ -203,18 +204,15 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int release(String path, FuseFileInfo fi) {
-		var returnCode = cachedFileFactory.close(fi.fh.get()).thenApply(ignored -> 0).exceptionally(e -> {
-			LOG.error("release() failed", e);
-			return -ErrorCodes.EIO();
-		});
-		return returnOrTimeout(returnCode);
+		openFileFactory.close(fi.fh.get());
+		return 0;
 	}
 
 	@Override
 	public int rename(String oldpath, String newpath) {
 		var returnCode = provider.move(CloudPath.of(oldpath), CloudPath.of(newpath), true)
 				.thenApply(p -> {
-					cachedFileFactory.moved(CloudPath.of(oldpath), CloudPath.of(newpath));
+					openFileFactory.moved(CloudPath.of(oldpath), CloudPath.of(newpath));
 					return 0;
 				})
 				.exceptionally(completionThrowable -> {
@@ -268,7 +266,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 					try {
 						var size = metadata.getSize().orElse(0l);
 						var lastModified = metadata.getLastModifiedDate().orElse(Instant.EPOCH);
-						var handle = cachedFileFactory.open(path, BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, lastModified);
+						var handle = openFileFactory.open(path, BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, lastModified);
 						fi.fh.set(handle.getId());
 						return 0;
 					} catch (IOException e) {
@@ -308,7 +306,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	int deleteResource(CloudPath path, String msgOnError) {
 		var returnCode = provider.delete(path)
 				.thenApply(ignored -> {
-					cachedFileFactory.delete(path);
+					openFileFactory.delete(path);
 					return 0;
 				})
 				.exceptionally(completionThrowable -> {
@@ -325,7 +323,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int read(String path, Pointer buf, long size, long offset, FuseFileInfo fi) {
-		var openFile = cachedFileFactory.get(fi.fh.get());
+		var openFile = openFileFactory.get(fi.fh.get());
 		if (openFile.isEmpty()) {
 			return -ErrorCodes.EBADF();
 		}
@@ -344,7 +342,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int write(String path, Pointer buf, long size, long offset, FuseFileInfo fi) {
-		var openFile = cachedFileFactory.get(fi.fh.get());
+		var openFile = openFileFactory.get(fi.fh.get());
 		if (openFile.isEmpty()) {
 			return -ErrorCodes.EBADF();
 		}
@@ -381,7 +379,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int ftruncate(String path, long size, FuseFileInfo fi) {
-		var handle = cachedFileFactory.get(fi.fh.get());
+		var handle = openFileFactory.get(fi.fh.get());
 		if (handle.isEmpty()) {
 			return -ErrorCodes.EBADF();
 		}

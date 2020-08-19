@@ -39,8 +39,8 @@ public class AccessPatternIntegrationTest {
 	@BeforeEach
 	void setup(@TempDir Path tmpDir) {
 		this.tmpDir = tmpDir;
-		this.provider = CloudAccess.toLocalFileSystem(tmpDir);
-		this.fs = new CloudAccessFS(provider, 1000);
+		this.provider = CloudAccess.toLocalFileSystem(tmpDir.resolve("mirrored"));
+		this.fs = new CloudAccessFS(provider, tmpDir.resolve("cache"), 1000);
 	}
 
 	@Test

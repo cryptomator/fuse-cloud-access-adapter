@@ -30,7 +30,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
 
-public class CachedFileTest {
+public class OpenFileTest {
 
 	private CloudPath file;
 	private Path tmpFile;
@@ -38,7 +38,7 @@ public class CachedFileTest {
 	private FileSystemProvider tmpFileSystemProvider;
 	private CloudProvider provider;
 	private FileChannel fileChannel;
-	private CachedFile cachedFile;
+	private OpenFile openFile;
 	private RangeSet<Long> populatedRanges;
 	private Consumer<CloudPath> onRelease;
 
@@ -52,7 +52,7 @@ public class CachedFileTest {
 		this.fileChannel = Mockito.mock(FileChannel.class);
 		this.populatedRanges = Mockito.mock(RangeSet.class);
 		this.onRelease = Mockito.mock(Consumer.class);
-		this.cachedFile = new CachedFile(file, tmpFile, fileChannel, provider, populatedRanges, Instant.EPOCH, onRelease);
+		this.openFile = new OpenFile(file, tmpFile, fileChannel, provider, populatedRanges, Instant.EPOCH);
 		Mockito.when(fileChannel.size()).thenReturn(100l);
 		Mockito.when(tmpFile.getFileSystem()).thenReturn(tmpFileSystem);
 		Mockito.when(tmpFileSystem.provider()).thenReturn(tmpFileSystemProvider);
@@ -63,7 +63,7 @@ public class CachedFileTest {
 	@ValueSource(longs = {0l, 1l, 42l})
 	public void testCreate(long size, @TempDir Path tmpDir) throws IOException {
 		Path tmpFile = tmpDir.resolve("cache.file");
-		try (var cachedFile = CachedFile.create(file, tmpFile, provider, size, Instant.EPOCH, onRelease)) {
+		try (var cachedFile = OpenFile.create(file, tmpFile, provider, size, Instant.EPOCH)) {
 			Assertions.assertNotNull(cachedFile);
 			Assertions.assertEquals(size, Files.size(tmpFile));
 		}
@@ -72,7 +72,7 @@ public class CachedFileTest {
 	@Test
 	@DisplayName("load region [101, 110] which is behind EOF")
 	public void testEof() {
-		var futureResult = cachedFile.load(101, 9);
+		var futureResult = openFile.load(101, 9);
 		Assertions.assertTrue(futureResult.toCompletableFuture().isCompletedExceptionally());
 	}
 
@@ -85,7 +85,7 @@ public class CachedFileTest {
 		Mockito.when(provider.read(file, 50, 10, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
 		Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(50l), Mockito.eq(10l))).thenReturn(10l);
 
-		var futureResult = cachedFile.load(50, 10);
+		var futureResult = openFile.load(50, 10);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 		Assertions.assertEquals(result, fileChannel);
@@ -102,7 +102,7 @@ public class CachedFileTest {
 		Mockito.when(provider.read(file, 50, 10, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
 		Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(50l), Mockito.eq(10l))).thenReturn(9l);
 
-		var futureResult = cachedFile.load(50, 10);
+		var futureResult = openFile.load(50, 10);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 		Assertions.assertEquals(result, fileChannel);
@@ -116,7 +116,7 @@ public class CachedFileTest {
 		var e = new IOException("fail.");
 		Mockito.when(provider.read(file, 50, 10, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.failedFuture(e));
 
-		var futureResult = cachedFile.load(50, 10);
+		var futureResult = openFile.load(50, 10);
 		var ee = Assertions.assertThrows(ExecutionException.class, () -> {
 			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 		});
@@ -133,7 +133,7 @@ public class CachedFileTest {
 		Mockito.when(provider.read(file, 50, 10, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
 		Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(50l), Mockito.eq(10l))).thenThrow(e);
 
-		var futureResult = cachedFile.load(50, 10);
+		var futureResult = openFile.load(50, 10);
 		var ee = Assertions.assertThrows(ExecutionException.class, () -> {
 			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 		});
@@ -145,7 +145,7 @@ public class CachedFileTest {
 	@Test
 	@DisplayName("load region [50, 50] (empty range)")
 	public void testLoadEmptyRange() {
-		var futureResult = cachedFile.load(50, 0);
+		var futureResult = openFile.load(50, 0);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 		Assertions.assertEquals(result, fileChannel);
@@ -157,7 +157,7 @@ public class CachedFileTest {
 	public void testLoadCached() {
 		Mockito.when(populatedRanges.encloses(Range.closedOpen(50l, 60l))).thenReturn(true);
 
-		var futureResult = cachedFile.load(50, 10);
+		var futureResult = openFile.load(50, 10);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 		Assertions.assertEquals(result, fileChannel);
@@ -174,7 +174,7 @@ public class CachedFileTest {
 		Mockito.when(provider.read(file, 60, 10, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
 		Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(60l), Mockito.eq(10l))).thenReturn(10l);
 
-		var futureResult = cachedFile.load(50, 20);
+		var futureResult = openFile.load(50, 20);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 		Assertions.assertEquals(result, fileChannel);
@@ -186,60 +186,8 @@ public class CachedFileTest {
 	@ParameterizedTest(name = "truncate({0})")
 	@ValueSource(longs = {0l, 1l, 2l, 3l})
 	public void testTruncate(long size) throws IOException {
-		cachedFile.truncate(size);
+		openFile.truncate(size);
 		Mockito.verify(fileChannel).truncate(size);
-	}
-
-	@Test
-	@DisplayName("release last open file handle (dirty)")
-	public void testReleaseFileHandleDirty() throws IOException {
-		var handle = cachedFile.openFileHandle();
-		cachedFile.markDirty();
-		Assumptions.assumeTrue(cachedFile.isDirty());
-		Mockito.when(provider.write(Mockito.eq(file), Mockito.eq(true), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(null));
-		Mockito.doNothing().when(fileChannel).close();
-
-		var futureResult = cachedFile.releaseFileHandle(handle.getId());
-
-		Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
-		Mockito.verify(provider).write(Mockito.eq(file), Mockito.eq(true), Mockito.any(), Mockito.any());
-		Mockito.verify(fileChannel).close();
-		Mockito.verify(onRelease).accept(file);
-		Mockito.verify(tmpFileSystemProvider).delete(tmpFile);
-	}
-
-	@Test
-	@DisplayName("release last open file handle (non-dirty)")
-	public void testReleaseFileHandleNonDirty() throws IOException {
-		var handle = cachedFile.openFileHandle();
-		Assumptions.assumeFalse(cachedFile.isDirty());
-		Mockito.doNothing().when(fileChannel).close();
-
-		var futureResult = cachedFile.releaseFileHandle(handle.getId());
-
-		Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
-		Mockito.verify(provider, Mockito.never()).write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.any());
-		Mockito.verify(fileChannel).close();
-		Mockito.verify(onRelease).accept(file);
-		Mockito.verify(tmpFileSystemProvider).delete(tmpFile);
-	}
-
-	@Test
-	@DisplayName("release file handle (but not last)")
-	public void testReleaseFileHandleNotLast() throws IOException {
-		var handle1 = cachedFile.openFileHandle();
-		var handle2 = cachedFile.openFileHandle();
-		cachedFile.markDirty();
-		Assumptions.assumeTrue(cachedFile.isDirty());
-		Mockito.doNothing().when(fileChannel).close();
-
-		var futureResult = cachedFile.releaseFileHandle(handle1.getId());
-
-		Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
-		Mockito.verify(provider, Mockito.never()).write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.any());
-		Mockito.verify(fileChannel, Mockito.never()).close();
-		Mockito.verify(onRelease, Mockito.never()).accept(Mockito.any());
-		Mockito.verify(tmpFileSystemProvider, Mockito.never()).delete(tmpFile);
 	}
 
 }

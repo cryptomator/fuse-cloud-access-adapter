@@ -19,26 +19,26 @@ import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
-class CachedFileHandleTest {
+class OpenFileHandleTest {
 
-	private CachedFile cachedFile;
+	private OpenFile openFile;
 	private FileChannel fileChannel;
 	private Pointer buf;
-	private CachedFileHandle handle;
+	private OpenFileHandle handle;
 
 	@BeforeEach
 	public void setup() {
-		this.cachedFile = Mockito.mock(CachedFile.class);
+		this.openFile = Mockito.mock(OpenFile.class);
 		this.fileChannel = Mockito.mock(FileChannel.class);
 		this.buf = Mockito.mock(Pointer.class);
-		this.handle = new CachedFileHandle(cachedFile, 42l);
+		this.handle = new OpenFileHandle(openFile, 42l);
 	}
 
 	@DisplayName("test I/O error during handle.read(...)")
 	@Test
 	public void testReadFailsWithException() throws IOException {
 		var e = new IOException("fail");
-		Mockito.when(cachedFile.load(1000l, 42l)).thenReturn(CompletableFuture.completedFuture(fileChannel));
+		Mockito.when(openFile.load(1000l, 42l)).thenReturn(CompletableFuture.completedFuture(fileChannel));
 		Mockito.when(fileChannel.transferTo(Mockito.anyLong(), Mockito.anyLong(), Mockito.any())).thenThrow(e);
 
 		var futureResult = handle.read(buf, 1000l, 42l);
@@ -52,7 +52,7 @@ class CachedFileHandleTest {
 
 	@Test
 	public void testReadToEof() throws IOException {
-		Mockito.when(cachedFile.load(1000l, 100l)).thenReturn(CompletableFuture.completedFuture(fileChannel));
+		Mockito.when(openFile.load(1000l, 100l)).thenReturn(CompletableFuture.completedFuture(fileChannel));
 		Mockito.doAnswer(invocation -> {
 			WritableByteChannel target = invocation.getArgument(2);
 			target.write(ByteBuffer.allocate(50));
@@ -73,7 +73,7 @@ class CachedFileHandleTest {
 		var content = new byte[n];
 		var transferred = new byte[n];
 		new Random(42l).nextBytes(content);
-		Mockito.when(cachedFile.load(1000l, n)).thenReturn(CompletableFuture.completedFuture(fileChannel));
+		Mockito.when(openFile.load(1000l, n)).thenReturn(CompletableFuture.completedFuture(fileChannel));
 		Mockito.doAnswer(invocation -> {
 			long pos = invocation.getArgument(0);
 			long count = invocation.getArgument(1);
@@ -101,7 +101,7 @@ class CachedFileHandleTest {
 	@Test
 	public void testWriteFailsWithException() throws IOException {
 		var e = new IOException("fail");
-		Mockito.when(cachedFile.load(0, Long.MAX_VALUE)).thenReturn(CompletableFuture.completedFuture(fileChannel));
+		Mockito.when(openFile.load(0, Long.MAX_VALUE)).thenReturn(CompletableFuture.completedFuture(fileChannel));
 		Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.anyLong(), Mockito.anyLong())).thenThrow(e);
 
 		var futureResult = handle.write(buf, 1000l, 42l);
@@ -120,7 +120,7 @@ class CachedFileHandleTest {
 		var content = new byte[n];
 		var transferred = new byte[n];
 		new Random(42l).nextBytes(content);
-		Mockito.when(cachedFile.load(0, Long.MAX_VALUE)).thenReturn(CompletableFuture.completedFuture(fileChannel));
+		Mockito.when(openFile.load(0, Long.MAX_VALUE)).thenReturn(CompletableFuture.completedFuture(fileChannel));
 		Mockito.doAnswer(invocation -> {
 			long offset = invocation.getArgument(0);
 			byte[] dst = invocation.getArgument(1);

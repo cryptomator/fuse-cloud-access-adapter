@@ -16,6 +16,7 @@ import org.slf4j.LoggerFactory;
 import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
@@ -24,50 +25,70 @@ import java.nio.channels.WritableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import static java.nio.file.StandardOpenOption.*;
 
-public class CachedFile implements Closeable {
+class OpenFile implements Closeable {
 
-	private static final Logger LOG = LoggerFactory.getLogger(CachedFile.class);
+	private static final Logger LOG = LoggerFactory.getLogger(OpenFile.class);
 	private static final AtomicLong FILE_HANDLE_GEN = new AtomicLong();
 
 	private final Path tmpFilePath;
 	private final FileChannel fc;
 	private final CloudProvider provider;
 	private final RangeSet<Long> populatedRanges;
-	private final Consumer<CloudPath> onReleased;
-	private final Map<Long, CachedFileHandle> handles;
+	private final AtomicInteger openFileHandles;
+	private final Set<Long> handles;
 	private CloudPath path;
 	private Instant lastModified;
 	private boolean dirty;
-	private boolean deleted;
 
 	// visible for testing
-	CachedFile(CloudPath path, Path tmpFilePath, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified, Consumer<CloudPath> onReleased) {
+	OpenFile(CloudPath path, Path tmpFilePath, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified) {
 		this.path = path;
 		this.tmpFilePath = tmpFilePath;
 		this.fc = fc;
 		this.provider = provider;
 		this.populatedRanges = populatedRanges;
-		this.onReleased = onReleased;
-		this.handles = new HashMap<>();
+		this.openFileHandles = new AtomicInteger();
 		this.lastModified = initialLastModified;
+		this.handles = new HashSet<>();
 	}
 
-	public static CachedFile create(CloudPath path, Path tmpFilePath, CloudProvider provider, long initialSize, Instant initialLastModified, Consumer<CloudPath> onReleased) throws IOException {
+	CloudPath getPath() {
+		return path;
+	}
+
+	Path getTmpFilePath() {
+		return tmpFilePath;
+	}
+
+	int opened() {
+		return openFileHandles.incrementAndGet();
+	}
+
+	int released() {
+		return openFileHandles.decrementAndGet();
+	}
+
+	Set<Long> getHandles() {
+		return handles;
+	}
+
+	public static OpenFile create(CloudPath path, Path tmpFilePath, CloudProvider provider, long initialSize, Instant initialLastModified) throws IOException {
 		var fc = FileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE);
 		if (initialSize > 0) {
 			fc.write(ByteBuffer.allocateDirect(1), initialSize - 1); // grow file to initialSize
 		}
-		return new CachedFile(path, tmpFilePath, fc, provider, TreeRangeSet.create(), initialLastModified, onReleased);
+		return new OpenFile(path, tmpFilePath, fc, provider, TreeRangeSet.create(), initialLastModified);
 	}
 
 	@Override
@@ -77,38 +98,6 @@ public class CachedFile implements Closeable {
 			Files.delete(tmpFilePath);
 		} catch (IOException e) {
 			LOG.error("Failed to close tmp file " + tmpFilePath, e);
-		}
-	}
-
-	public synchronized CachedFileHandle openFileHandle() {
-		var handleId = FILE_HANDLE_GEN.incrementAndGet();
-		var handle = new CachedFileHandle(this, handleId);
-		handles.put(handleId, handle);
-		return handle;
-	}
-
-	public synchronized CompletionStage<Void> releaseFileHandle(long fileHandle) {
-		handles.remove(fileHandle);
-		if (handles.isEmpty()) {
-			onReleased.accept(path);
-			if (deleted || !dirty) {
-				close();
-				return CompletableFuture.completedFuture(null);
-			}
-			try {
-				assert dirty && !deleted;
-				LOG.debug("uploading {}...", path);
-				fc.position(0);
-				// TODO Performance: schedule upload on background task, return immediately, save file contents in "lost+found" dir on error
-				return provider.write(path, true, Channels.newInputStream(fc), ProgressListener.NO_PROGRESS_AWARE).thenRun(() -> {
-					LOG.debug("uploaded {}", path);
-					close();
-				});
-			} catch (IOException e) {
-				return CompletableFuture.failedFuture(e);
-			}
-		} else {
-			return CompletableFuture.completedFuture(null);
 		}
 	}
 
@@ -166,14 +155,7 @@ public class CachedFile implements Closeable {
 	}
 
 	boolean isDirty() {
-		return dirty;
-	}
-
-	/**
-	 * Prevents the cached data from being persisted on {@link #releaseFileHandle(long)}.
-	 */
-	void markDeleted() {
-		this.deleted = true;
+		return dirty && fc.isOpen();
 	}
 
 	void updatePath(CloudPath newPath) {
@@ -186,5 +168,10 @@ public class CachedFile implements Closeable {
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}
+	}
+
+	public InputStream asPersistableStream() throws IOException {
+		fc.position(0);
+		return Channels.newInputStream(fc);
 	}
 }

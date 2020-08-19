@@ -42,7 +42,7 @@ public class CloudAccessFSTest {
 
 	private CloudAccessFS cloudFs;
 	private CloudProvider provider;
-	private CachedFileFactory fileFactory;
+	private OpenFileFactory fileFactory;
 	private OpenDirFactory dirFactory;
 
 	@BeforeAll
@@ -56,7 +56,7 @@ public class CloudAccessFSTest {
 	@BeforeEach
 	public void setup() {
 		provider = Mockito.mock(CloudProvider.class);
-		fileFactory = Mockito.mock(CachedFileFactory.class);
+		fileFactory = Mockito.mock(OpenFileFactory.class);
 		dirFactory = Mockito.mock(OpenDirFactory.class);
 		cloudFs = new CloudAccessFS(provider, CloudAccessFSTest.TIMEOUT, fileFactory, dirFactory);
 	}
@@ -304,7 +304,7 @@ public class CloudAccessFSTest {
 		@DisplayName("open() returns 0 in success and writes the handle to field FileInfo.fh")
 		@Test
 		public void testSuccessfulOpenReturnsZeroAndStoresHandle() throws IOException {
-			CachedFileHandle handle = Mockito.mock(CachedFileHandle.class);
+			OpenFileHandle handle = Mockito.mock(OpenFileHandle.class);
 			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
 			Mockito.when(itemMetadata.getItemType()).thenReturn(CloudItemType.FILE);
 			Mockito.when(handle.getId()).thenReturn(42l);
@@ -369,13 +369,13 @@ public class CloudAccessFSTest {
 	class ReadTest {
 
 		private TestFileInfo fi;
-		private CachedFileHandle fileHandle;
+		private OpenFileHandle fileHandle;
 		private Pointer buf;
 
 		@BeforeEach
 		public void setup() {
 			fi = TestFileInfo.create();
-			fileHandle = Mockito.mock(CachedFileHandle.class);
+			fileHandle = Mockito.mock(OpenFileHandle.class);
 			buf = Mockito.mock(Pointer.class);
 		}
 
@@ -429,13 +429,13 @@ public class CloudAccessFSTest {
 	class WriteTest {
 
 		private TestFileInfo fi;
-		private CachedFileHandle fileHandle;
+		private OpenFileHandle fileHandle;
 		private Pointer buf;
 
 		@BeforeEach
 		public void setup() {
 			fi = TestFileInfo.create();
-			fileHandle = Mockito.mock(CachedFileHandle.class);
+			fileHandle = Mockito.mock(OpenFileHandle.class);
 			buf = Mockito.mock(Pointer.class);
 		}
 
@@ -591,7 +591,7 @@ public class CloudAccessFSTest {
 		@Test
 		public void testNotExistingCaseReturnsZeroAndOpensFile() throws IOException {
 			fi.fh.set(0);
-			CachedFileHandle handle = Mockito.mock(CachedFileHandle.class);
+			OpenFileHandle handle = Mockito.mock(OpenFileHandle.class);
 			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
 			Mockito.when(handle.getId()).thenReturn(1337l);
 			Mockito.when(itemMetadata.getPath()).thenReturn(PATH);
@@ -610,7 +610,7 @@ public class CloudAccessFSTest {
 		public void testExistingCaseReturnsZeroAndOpensFile() throws IOException {
 			fi.fh.set(0);
 			var e = new AlreadyExistsException(PATH.toString());
-			CachedFileHandle handle = Mockito.mock(CachedFileHandle.class);
+			OpenFileHandle handle = Mockito.mock(OpenFileHandle.class);
 			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
 			Mockito.when(handle.getId()).thenReturn(1337l);
 			Mockito.when(itemMetadata.getPath()).thenReturn(PATH);
