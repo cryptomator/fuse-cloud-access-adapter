@@ -9,16 +9,20 @@ import java.nio.channels.Channels;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
-public class CachedFileHandle {
+class OpenFileHandle {
 
 	private static final int BUFFER_SIZE = 1024;
 
-	private final CachedFile cachedFile;
+	private final OpenFile openFile;
 	private final long id;
 
-	public CachedFileHandle(CachedFile cachedFile, long id) {
-		this.cachedFile = cachedFile;
+	public OpenFileHandle(OpenFile openFile, long id) {
+		this.openFile = openFile;
 		this.id = id;
+	}
+
+	public OpenFile getFile() {
+		return openFile;
 	}
 
 	long getId() {
@@ -35,7 +39,7 @@ public class CachedFileHandle {
 	 * or failing with an {@link IOException}
 	 */
 	public CompletionStage<Integer> read(Pointer buf, long offset, long size) {
-		return cachedFile.load(offset, size).thenCompose(fc -> {
+		return openFile.load(offset, size).thenCompose(fc -> {
 			try {
 				long pos = offset;
 				while (pos < offset + size) {
@@ -66,8 +70,8 @@ public class CachedFileHandle {
 	 * @return A CompletionStage either containing the actual number of bytes written or failing with an {@link IOException}
 	 */
 	public CompletionStage<Integer> write(Pointer buf, long offset, long size) {
-		cachedFile.markDirty();
-		return cachedFile.load(0, Long.MAX_VALUE).thenCompose(fc -> {
+		openFile.setDirty(true);
+		return openFile.load(0, Long.MAX_VALUE).thenCompose(fc -> {
 			try {
 				long pos = offset;
 				while (pos < offset + size) {
@@ -85,13 +89,9 @@ public class CachedFileHandle {
 		});
 	}
 
-	public CompletionStage<Void> release() {
-		return cachedFile.releaseFileHandle(id);
-	}
-
 	CompletionStage<Void> truncate(long size) {
 		try {
-			cachedFile.truncate(size);
+			openFile.truncate(size);
 			return CompletableFuture.completedFuture(null);
 		} catch (IOException e) {
 			return CompletableFuture.failedFuture(e);
