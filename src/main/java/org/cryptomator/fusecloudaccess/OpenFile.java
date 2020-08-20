@@ -32,9 +32,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Consumer;
 
-import static java.nio.file.StandardOpenOption.*;
+import static java.nio.file.StandardOpenOption.CREATE_NEW;
+import static java.nio.file.StandardOpenOption.READ;
+import static java.nio.file.StandardOpenOption.SPARSE;
+import static java.nio.file.StandardOpenOption.WRITE;
 
 class OpenFile implements Closeable {
 
@@ -112,6 +114,7 @@ class OpenFile implements Closeable {
 	public CompletionStage<FileChannel> load(long offset, long count) {
 		Preconditions.checkArgument(offset >= 0);
 		Preconditions.checkArgument(count >= 0);
+		Preconditions.checkState(fc.isOpen());
 		try {
 			if (offset > fc.size()) {
 				throw new EOFException("Requested range beyond EOF");
@@ -145,6 +148,7 @@ class OpenFile implements Closeable {
 	}
 
 	void truncate(long size) throws IOException {
+		Preconditions.checkState(fc.isOpen());
 		fc.truncate(size);
 		setDirty(true);
 	}
@@ -174,6 +178,7 @@ class OpenFile implements Closeable {
 	}
 
 	public InputStream asPersistableStream() throws IOException {
+		Preconditions.checkState(fc.isOpen());
 		fc.position(0);
 		return Channels.newInputStream(fc);
 	}
