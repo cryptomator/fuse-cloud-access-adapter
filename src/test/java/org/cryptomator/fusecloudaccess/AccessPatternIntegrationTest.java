@@ -18,7 +18,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.Arrays;
 
 import static java.nio.charset.StandardCharsets.US_ASCII;
@@ -32,15 +31,19 @@ public class AccessPatternIntegrationTest {
 		System.setProperty(SimpleLogger.DATE_TIME_FORMAT_KEY, "HH:mm:ss.SSS");
 	}
 
-	private Path tmpDir;
+	private Path mirrored;
+	private Path cacheDir;
 	private CloudProvider provider;
 	private CloudAccessFS fs;
 
 	@BeforeEach
-	void setup(@TempDir Path tmpDir) {
-		this.tmpDir = tmpDir;
-		this.provider = CloudAccess.toLocalFileSystem(tmpDir.resolve("mirrored"));
-		this.fs = new CloudAccessFS(provider, tmpDir.resolve("cache"), 1000);
+	void setup(@TempDir Path tmpDir) throws IOException {
+		this.mirrored = tmpDir.resolve("mirrored");
+		this.cacheDir = tmpDir.resolve("cache");
+		Files.createDirectory(this.mirrored);
+		Files.createDirectory(this.cacheDir);
+		this.provider = CloudAccess.toLocalFileSystem(this.mirrored);
+		this.fs = new CloudAccessFS(provider, this.cacheDir, 1000);
 	}
 
 	@Test
@@ -51,7 +54,7 @@ public class AccessPatternIntegrationTest {
 		FuseFileInfo fi1 = TestFileInfo.create();
 		fs.create("/foo.txt", 0644, fi1);
 		fs.write("/foo.txt", mockPointer(US_ASCII.encode("asd")), 3, 0, fi1);
-		Assertions.assertTrue(Files.exists(tmpDir.resolve("foo.txt")));
+		Assertions.assertTrue(Files.exists(mirrored.resolve("foo.txt")));
 
 		// mkdir foo.txt-temp3000
 		fs.mkdir("/foo.txt-temp3000", 0755);
@@ -63,7 +66,7 @@ public class AccessPatternIntegrationTest {
 		FuseFileInfo fi2 = TestFileInfo.create();
 		fs.create("/foo.txt-temp3000/foo.txt", 0644, fi2);
 		fs.write("/foo.txt-temp3000/foo.txt", mockPointer(US_ASCII.encode("asdasd")), 6, 0, fi2);
-		Assertions.assertTrue(Files.exists(tmpDir.resolve("foo.txt-temp3000/foo.txt")));
+		Assertions.assertTrue(Files.exists(mirrored.resolve("foo.txt-temp3000/foo.txt")));
 
 		// check updated metadata:
 		TestFileStat stat1 = TestFileStat.create();
@@ -83,12 +86,12 @@ public class AccessPatternIntegrationTest {
 
 		// rm -r foo.txt-temp3000
 		fs.rmdir("/foo.txt-temp3000");
-		Assertions.assertTrue(Files.notExists(tmpDir.resolve("foo.txt-temp3000")));
+		Assertions.assertTrue(Files.notExists(mirrored.resolve("foo.txt-temp3000")));
 
 		// rm foo.txt-temp3001
 		fs.release("/foo.txt", fi1);
 		fs.unlink("/foo.txt-temp3001");
-		Assertions.assertTrue(Files.notExists(tmpDir.resolve("foo.txt-temp3001")));
+		Assertions.assertTrue(Files.notExists(mirrored.resolve("foo.txt-temp3001")));
 
 		// cat foo.txt == "asdasd"
 		ByteBuffer buf = ByteBuffer.allocate(7);
