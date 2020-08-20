@@ -29,6 +29,7 @@ class OpenFileFactory {
 	private static final AtomicLong FILE_HANDLE_GEN = new AtomicLong();
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFileFactory.class);
 
+	// Attention: Thread safety is important when modifying any of the following two collections:
 	private final ConcurrentMap<CloudPath, OpenFile> activeFiles = new ConcurrentHashMap<>();
 	private final Cache<CloudPath, OpenFile> cachedFiles = CacheBuilder.newBuilder().expireAfterWrite(10, TimeUnit.SECONDS).removalListener(this::removedFromCache).build();
 	private final Map<Long, OpenFileHandle> fileHandles = new HashMap<>();
@@ -113,6 +114,7 @@ class OpenFileFactory {
 		var cachedFile = cachedFiles.getIfPresent(oldPath);
 		if (cachedFile != null) {
 			cachedFiles.put(newPath, cachedFile);
+			cachedFile.updatePath(newPath);
 			cachedFiles.invalidate(oldPath);
 		}
 	}
@@ -168,6 +170,7 @@ class OpenFileFactory {
 		}
 	}
 
+	// TODO: is there a cleaner way to access cached metadata?
 	Optional<CloudItemMetadata> getCachedMetadata(CloudPath path) {
 		return Optional.ofNullable(activeFiles.get(path)).map(OpenFile::getMetadata);
 	}
