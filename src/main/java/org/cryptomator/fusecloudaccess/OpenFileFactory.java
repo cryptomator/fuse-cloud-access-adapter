@@ -101,16 +101,14 @@ class OpenFileFactory {
 	 */
 	public synchronized void moved(CloudPath oldPath, CloudPath newPath) {
 		var activeFile = activeFiles.get(oldPath);
-		activeFiles.compute(newPath, (path, previouslyCachedFile) -> {
-			if (previouslyCachedFile != null) {
-				previouslyCachedFile.close();
-				previouslyCachedFile.getHandles().forEach(fileHandles::remove);
-			}
-			if (activeFile != null) {
-				activeFile.updatePath(newPath);
-			}
-			return activeFile; // removes entry from map if null
-		});
+		var previouslyActiveFile = activeFiles.remove(newPath);
+		if (previouslyActiveFile != null) {
+			previouslyActiveFile.close();
+		}
+		if (activeFile != null) {
+			activeFile.updatePath(newPath);
+			activeFiles.put(newPath, activeFile);
+		}
 		var cachedFile = cachedFiles.getIfPresent(oldPath);
 		if (cachedFile != null) {
 			cachedFiles.put(newPath, cachedFile);
@@ -130,7 +128,6 @@ class OpenFileFactory {
 		activeFiles.compute(path, (p, openFile) -> {
 			if (openFile != null) {
 				openFile.close();
-				openFile.getHandles().forEach(fileHandles::remove);
 			}
 			return null; // removes entry from map
 		});

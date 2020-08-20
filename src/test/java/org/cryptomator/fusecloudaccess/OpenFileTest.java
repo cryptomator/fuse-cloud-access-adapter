@@ -6,7 +6,6 @@ import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -54,6 +53,7 @@ public class OpenFileTest {
 		this.onRelease = Mockito.mock(Consumer.class);
 		this.openFile = new OpenFile(file, tmpFile, fileChannel, provider, populatedRanges, Instant.EPOCH);
 		Mockito.when(fileChannel.size()).thenReturn(100l);
+		Mockito.when(fileChannel.isOpen()).thenReturn(true);
 		Mockito.when(tmpFile.getFileSystem()).thenReturn(tmpFileSystem);
 		Mockito.when(tmpFileSystem.provider()).thenReturn(tmpFileSystemProvider);
 	}
