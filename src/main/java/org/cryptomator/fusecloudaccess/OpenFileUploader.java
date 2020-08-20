@@ -46,6 +46,7 @@ class OpenFileUploader {
 		var task = provider.write(path, true, in, ProgressListener.NO_PROGRESS_AWARE)
 				.thenRun(() -> {
 					LOG.debug("uploaded successfully: {}", path);
+					file.setDirty(false);
 				}).exceptionally(e -> {
 					LOG.error("Upload of " + path + " failed.", e);
 					// TODO copy file to some lost+found dir

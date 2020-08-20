@@ -146,12 +146,15 @@ class OpenFile implements Closeable {
 
 	void truncate(long size) throws IOException {
 		fc.truncate(size);
-		markDirty();
+		setDirty(true);
 	}
 
-	void markDirty() {
-		this.lastModified = Instant.now();
-		this.dirty = true;
+
+	void setDirty(boolean dirty) {
+		this.dirty = dirty;
+		if (dirty) {
+			this.lastModified = Instant.now();
+		}
 	}
 
 	boolean isDirty() {

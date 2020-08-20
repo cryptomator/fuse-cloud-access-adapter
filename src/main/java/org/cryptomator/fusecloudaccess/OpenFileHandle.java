@@ -70,7 +70,7 @@ class OpenFileHandle {
 	 * @return A CompletionStage either containing the actual number of bytes written or failing with an {@link IOException}
 	 */
 	public CompletionStage<Integer> write(Pointer buf, long offset, long size) {
-		openFile.markDirty();
+		openFile.setDirty(true);
 		return openFile.load(0, Long.MAX_VALUE).thenCompose(fc -> {
 			try {
 				long pos = offset;
