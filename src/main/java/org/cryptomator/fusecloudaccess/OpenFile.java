@@ -180,6 +180,6 @@ class OpenFile implements Closeable {
 	public InputStream asPersistableStream() throws IOException {
 		Preconditions.checkState(fc.isOpen());
 		fc.position(0);
-		return Channels.newInputStream(fc);
+		return new UnclosableInputStream(Channels.newInputStream(fc));
 	}
 }
