@@ -100,15 +100,16 @@ class OpenFileFactory {
 	 * @param newPath New path which is used to access the cached file
 	 */
 	public synchronized void moved(CloudPath oldPath, CloudPath newPath) {
-		var activeFile = activeFiles.get(oldPath);
 		var previouslyActiveFile = activeFiles.remove(newPath);
 		if (previouslyActiveFile != null) {
 			previouslyActiveFile.close();
 		}
+		var activeFile = activeFiles.remove(oldPath);
 		if (activeFile != null) {
 			activeFile.updatePath(newPath);
 			activeFiles.put(newPath, activeFile);
 		}
+		cachedFiles.invalidate(newPath);
 		var cachedFile = cachedFiles.getIfPresent(oldPath);
 		if (cachedFile != null) {
 			cachedFiles.put(newPath, cachedFile);
