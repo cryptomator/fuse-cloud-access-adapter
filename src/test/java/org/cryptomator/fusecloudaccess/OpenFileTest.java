@@ -5,6 +5,7 @@ import com.google.common.collect.RangeSet;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
+import org.cryptomator.cloudaccess.api.exceptions.CloudProviderException;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -113,33 +114,33 @@ public class OpenFileTest {
 	@Test
 	@DisplayName("load region [50, 60] (fail exceptionally due to failed future)")
 	public void testLoadFailsA() {
-		var e = new IOException("fail.");
+		var e = new CloudProviderException("fail.");
 		Mockito.when(provider.read(file, 50, 10, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.failedFuture(e));
 
 		var futureResult = openFile.load(50, 10);
-		var ee = Assertions.assertThrows(ExecutionException.class, () -> {
-			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+		var thrown = Assertions.assertThrows(CloudProviderException.class, () -> {
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().join());
 		});
 
 		Assertions.assertTrue(futureResult.toCompletableFuture().isCompletedExceptionally());
-		Assertions.assertEquals(e, ee.getCause());
+		Assertions.assertEquals(e, thrown);
 	}
 
 	@Test
 	@DisplayName("load region [50, 60] (fail exceptionally due to internal I/O error)")
 	public void testLoadFailsB() throws IOException {
-		var e = new IOException("fail.");
+		var e = new CloudProviderException("fail.");
 		var content = new byte[10];
 		Mockito.when(provider.read(file, 50, 10, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.completedFuture(new ByteArrayInputStream(content)));
 		Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(50l), Mockito.eq(10l))).thenThrow(e);
 
 		var futureResult = openFile.load(50, 10);
-		var ee = Assertions.assertThrows(ExecutionException.class, () -> {
-			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+		var thrown = Assertions.assertThrows(CloudProviderException.class, () -> {
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().join());
 		});
 
 		Assertions.assertTrue(futureResult.toCompletableFuture().isCompletedExceptionally());
-		Assertions.assertEquals(e, ee.getCause());
+		Assertions.assertEquals(e, thrown);
 	}
 
 	@Test

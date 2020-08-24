@@ -12,6 +12,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.impl.SimpleLogger;
+import ru.serce.jnrfuse.ErrorCodes;
+import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 
 import java.io.IOException;
@@ -47,7 +49,7 @@ public class AccessPatternIntegrationTest {
 	}
 
 	@Test
-	@Disabled // requires java.library.path to be set
+	//@Disabled // requires java.library.path to be set
 	@DisplayName("simulate TextEdit.app's access pattern during save")
 	void testAppleAutosaveAccessPattern() throws IOException, InterruptedException {
 		// echo "asd" > foo.txt
@@ -101,6 +103,30 @@ public class AccessPatternIntegrationTest {
 		fs.release("/foo.txt", fi3);
 		Assertions.assertEquals(6, numRead);
 		Assertions.assertArrayEquals("asdasd".getBytes(US_ASCII), Arrays.copyOf(buf.array(), numRead));
+	}
+
+	@Test
+	//@Disabled // requires java.library.path to be set
+	@DisplayName("simulates Notepad's access pattern during save of a new File")
+	void testWindowsNotepadSavePatternForNewFiles() {
+		FuseFileInfo fi1 = TestFileInfo.create();
+		FileStat stat = TestFileStat.create();
+		String p = "/foo.txt";
+		int code = fs.getattr(p,stat);
+
+		assert code == -ErrorCodes.ENOENT();
+
+		fs.create(p,0644,fi1);
+		fs.release(p,fi1);
+
+		FuseFileInfo fi2 = TestFileInfo.create();
+		fs.open(p,fi2);
+		fs.unlink(p);
+		fs.release(p,fi2);
+
+		FuseFileInfo fi3 = TestFileInfo.create();
+		fs.create(p,0644, fi3);
+		Assertions.assertEquals(0, fs.getattr(p,stat));
 	}
 
 	private Pointer mockPointer(ByteBuffer buf) {

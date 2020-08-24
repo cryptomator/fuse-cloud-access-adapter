@@ -25,20 +25,21 @@ class OpenFileUploader {
 		this.provider = provider;
 	}
 
-	public void scheduleUpload(OpenFile file) {
+	public CompletionStage<Void> scheduleUpload(OpenFile file) {
 		if (!file.isDirty()) {
 			LOG.trace("Upload of {} skipped. Unmodified.", file.getPath());
-			return;
+			return CompletableFuture.completedFuture(null);
 		}
 		try {
 			var in = file.asPersistableStream();
-			scheduleUpload(file, in);
+			return scheduleUpload(file, in);
 		} catch (IOException e) {
 			LOG.error("Upload of " + file.getPath() + " failed.", e);
+			return CompletableFuture.failedFuture(e);
 		}
 	}
 
-	private void scheduleUpload(OpenFile file, InputStream in) {
+	private CompletionStage<Void> scheduleUpload(OpenFile file, InputStream in) {
 		assert file.isDirty();
 		var path = file.getPath();
 		LOG.debug("uploading {}...", path);
@@ -55,6 +56,7 @@ class OpenFileUploader {
 					scheduledUploads.remove(id);
 				});
 		scheduledUploads.put(id, task);
+		return task;
 	}
 
 	public CompletionStage<Void> awaitPendingUploads() {
