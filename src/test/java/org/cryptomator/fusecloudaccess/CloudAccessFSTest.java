@@ -85,7 +85,7 @@ public class CloudAccessFSTest {
 	public void testRegular() {
 		int expectedResult = 1337;
 		var future = CompletableFuture.completedFuture(expectedResult);
-		Assertions.assertEquals(expectedResult, cloudFs.returnOrTimeout(future));
+		Assertions.assertEquals(expectedResult, cloudFs.returnOrTimeout(future,"",""));
 	}
 
 	@DisplayName("test returnOrTimeout() returns EINTR on interrupt")
@@ -93,7 +93,7 @@ public class CloudAccessFSTest {
 	public void testInterrupt() throws InterruptedException {
 		AtomicInteger actualResult = new AtomicInteger();
 		Thread t = new Thread(() -> {
-			actualResult.set(cloudFs.returnOrTimeout(new CompletableFuture<>()));
+			actualResult.set(cloudFs.returnOrTimeout(new CompletableFuture<>(),"",""));
 		});
 		t.start();
 		t.interrupt();
@@ -105,13 +105,13 @@ public class CloudAccessFSTest {
 	@Test
 	public void testExecution() {
 		CompletableFuture future = CompletableFuture.failedFuture(new Exception());
-		Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.returnOrTimeout(future));
+		Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.returnOrTimeout(future,"",""));
 	}
 
 	@DisplayName("test returnOrTimeout() return ETIMEDOUT on timeout")
 	@Test
 	public void testTimeout() {
-		Assertions.assertEquals(-ErrorCodes.ETIMEDOUT(), cloudFs.returnOrTimeout(new CompletableFuture<>()));
+		Assertions.assertEquals(-ErrorCodes.ETIMEDOUT(), cloudFs.returnOrTimeout(new CompletableFuture<>(),"",""));
 	}
 
 	@Nested

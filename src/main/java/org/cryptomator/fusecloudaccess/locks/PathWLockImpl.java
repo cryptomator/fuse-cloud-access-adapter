@@ -18,13 +18,13 @@ class PathWLockImpl extends PathLockImpl {
 
 	public static PathLockImpl create(List<String> pathComponents, Optional<PathLock> parent, ReadWriteLock lock, Function<List<String>, ReadWriteLock> dataLockSupplier) {
 		lock.writeLock().lock();
-		LOG.trace("Acquired write path lock for '{}'", pathComponents);
+		//LOG.trace("Acquired write path lock for '{}'", pathComponents);
 		return new PathWLockImpl(pathComponents, parent, lock, dataLockSupplier);
 	}
 
 	@Override
 	public void close() {
-		LOG.trace("Released write path lock for '{}'", pathComponents);
+		//LOG.trace("Released write path lock for '{}'", pathComponents);
 		lock.writeLock().unlock();
 		super.close();
 	}

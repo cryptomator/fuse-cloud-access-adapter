@@ -70,14 +70,14 @@ public class LockManager {
 	}
 
 	private void onLockRemoval(RemovalNotification<String, ReentrantReadWriteLock> notification) {
-		LOG.trace("Deleting ReadWriteLock for {}", notification.getKey());
+		//LOG.trace("Deleting ReadWriteLock for {}", notification.getKey());
 	}
 
 	private static class LockLoader extends CacheLoader<List<String>, ReadWriteLock> {
 
 		@Override
 		public ReadWriteLock load(List<String> key) {
-			LOG.trace("Creating ReadWriteLock for {}", key);
+			//LOG.trace("Creating ReadWriteLock for {}", key);
 			return new ReentrantReadWriteLock();
 		}
 	}
