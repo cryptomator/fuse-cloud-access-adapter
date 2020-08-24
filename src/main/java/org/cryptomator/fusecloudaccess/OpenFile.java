@@ -170,6 +170,7 @@ class OpenFile implements Closeable {
 	}
 
 	CloudItemMetadata getMetadata() {
+		Preconditions.checkState(fc.isOpen());
 		try {
 			return new CloudItemMetadata(path.getFileName().toString(), path, CloudItemType.FILE, Optional.of(lastModified), Optional.of(fc.size()));
 		} catch (IOException e) {
