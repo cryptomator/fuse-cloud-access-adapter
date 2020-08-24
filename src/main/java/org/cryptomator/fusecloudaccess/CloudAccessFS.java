@@ -80,7 +80,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			Thread.currentThread().interrupt();
 			return -ErrorCodes.EINTR();
 		} catch (ExecutionException e) {
-			LOG.error("encountered unhandled exception", e.getCause());
+			LOG.error("encountered unhandled exception", e);
 			return -ErrorCodes.EIO();
 		} catch (TimeoutException e) {
 			return -ErrorCodes.ETIMEDOUT();
@@ -127,7 +127,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 					return 0;
 				})
 				.exceptionally(e -> {
-					if (e.getCause() instanceof NotFoundException) {
+					if (e instanceof NotFoundException) {
 						return -ErrorCodes.ENOENT();
 					} else {
 						LOG.error("getattr() failed", e);
@@ -160,7 +160,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 					}
 				})
 				.exceptionally(e -> {
-					if (e.getCause() instanceof NotFoundException) {
+					if (e instanceof NotFoundException) {
 						return -ErrorCodes.ENOENT();
 					} else {
 						LOG.error("open() failed", e);
@@ -250,7 +250,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 					}
 				})
 				.exceptionally(e -> {
-					if (e.getCause() instanceof NotFoundException) {
+					if (e instanceof NotFoundException) {
 						return -ErrorCodes.ENOENT();
 					} else {
 						LOG.error("open() failed", e);
@@ -291,8 +291,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 					openFileFactory.moved(oldPath, newPath);
 					return 0;
 				})
-				.exceptionally(completionThrowable -> {
-					var e = completionThrowable.getCause();
+				.exceptionally(e -> {
 					if (e instanceof NotFoundException) {
 						return -ErrorCodes.ENOENT();
 					} else if (e instanceof AlreadyExistsException) {
@@ -319,8 +318,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	private CompletionStage<Integer> mkdirInternal(CloudPath path, long mode) {
 		return provider.createFolder(path)
 				.thenApply(p -> 0)
-				.exceptionally(completionThrowable -> {
-					var e = completionThrowable.getCause();
+				.exceptionally(e -> {
 					if (e instanceof AlreadyExistsException) {
 						return -ErrorCodes.EEXIST();
 					} else {
@@ -368,9 +366,9 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 					}
 				})
 				.exceptionally(e -> {
-					if (e.getCause() instanceof NotFoundException) {
+					if (e instanceof NotFoundException) {
 						return -ErrorCodes.ENOENT();
-					} else if (e.getCause() instanceof TypeMismatchException) {
+					} else if (e instanceof TypeMismatchException) {
 						return -ErrorCodes.EISDIR();
 					} else {
 						LOG.error("create() failed", e);
@@ -416,8 +414,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 					openFileFactory.delete(path);
 					return 0;
 				})
-				.exceptionally(completionThrowable -> {
-					final var e = completionThrowable.getCause();
+				.exceptionally(e -> {
 					if (e instanceof NotFoundException) {
 						return -ErrorCodes.ENOENT();
 					} else {
