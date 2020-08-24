@@ -49,7 +49,7 @@ public class AccessPatternIntegrationTest {
 	}
 
 	@Test
-	@Disabled // requires java.library.path to be set
+	//@Disabled // requires java.library.path to be set
 	@DisplayName("simulate TextEdit.app's access pattern during save")
 	void testAppleAutosaveAccessPattern() throws IOException, InterruptedException {
 		// echo "asd" > foo.txt
@@ -106,7 +106,7 @@ public class AccessPatternIntegrationTest {
 	}
 
 	@Test
-	@Disabled // requires java.library.path to be set
+	//@Disabled // requires java.library.path to be set
 	@DisplayName("simulates Notepad's access pattern during save of a new File")
 	void testWindowsNotepadSavePatternForNewFiles() {
 		FuseFileInfo fi1 = TestFileInfo.create();

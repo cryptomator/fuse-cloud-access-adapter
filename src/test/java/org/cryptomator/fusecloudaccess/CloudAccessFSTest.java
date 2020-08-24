@@ -36,6 +36,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -104,7 +105,7 @@ public class CloudAccessFSTest {
 	@DisplayName("test returnOrTimeout() returns EIO on ExecutionException")
 	@Test
 	public void testExecution() {
-		CompletableFuture future = CompletableFuture.failedFuture(new Exception());
+		CompletableFuture future = CompletableFuture.failedFuture(new CloudProviderException());
 		Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.returnOrTimeout(future));
 	}
 

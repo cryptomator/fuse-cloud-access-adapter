@@ -1,6 +1,7 @@
 package org.cryptomator.fusecloudaccess;
 
 import jnr.ffi.Pointer;
+import org.cryptomator.cloudaccess.api.exceptions.CloudProviderException;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -37,17 +38,17 @@ class OpenFileHandleTest {
 	@DisplayName("test I/O error during handle.read(...)")
 	@Test
 	public void testReadFailsWithException() throws IOException {
-		var e = new IOException("fail");
+		var e = new CloudProviderException("fail");
 		Mockito.when(openFile.load(1000l, 42l)).thenReturn(CompletableFuture.completedFuture(fileChannel));
 		Mockito.when(fileChannel.transferTo(Mockito.anyLong(), Mockito.anyLong(), Mockito.any())).thenThrow(e);
 
 		var futureResult = handle.read(buf, 1000l, 42l);
-		var ee = Assertions.assertThrows(ExecutionException.class, () -> {
-			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+		var thrown = Assertions.assertThrows(CloudProviderException.class, () -> {
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().join());
 		});
 
 		Assertions.assertTrue(futureResult.toCompletableFuture().isCompletedExceptionally());
-		Assertions.assertEquals(e, ee.getCause());
+		Assertions.assertEquals(e, thrown);
 	}
 
 	@Test
@@ -100,17 +101,17 @@ class OpenFileHandleTest {
 	@DisplayName("test I/O error during handle.write(...)")
 	@Test
 	public void testWriteFailsWithException() throws IOException {
-		var e = new IOException("fail");
+		var e = new CloudProviderException("fail");
 		Mockito.when(openFile.load(0, Long.MAX_VALUE)).thenReturn(CompletableFuture.completedFuture(fileChannel));
 		Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.anyLong(), Mockito.anyLong())).thenThrow(e);
 
 		var futureResult = handle.write(buf, 1000l, 42l);
-		var ee = Assertions.assertThrows(ExecutionException.class, () -> {
-			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+		var thrown = Assertions.assertThrows(CloudProviderException.class, () -> {
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().join());
 		});
 
 		Assertions.assertTrue(futureResult.toCompletableFuture().isCompletedExceptionally());
-		Assertions.assertEquals(e, ee.getCause());
+		Assertions.assertEquals(e, thrown);
 	}
 
 	@DisplayName("test handle.write(...)")

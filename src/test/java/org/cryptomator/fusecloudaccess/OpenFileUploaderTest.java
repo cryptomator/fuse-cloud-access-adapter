@@ -32,7 +32,7 @@ public class OpenFileUploaderTest {
 
 	@Test
 	@DisplayName("noop when scheduling unmodified file")
-	public void uploadUnmodified() {
+	public void testUploadUnmodified() {
 		Mockito.when(file.isDirty()).thenReturn(false);
 
 		uploader.scheduleUpload(file);
@@ -43,7 +43,7 @@ public class OpenFileUploaderTest {
 
 	@Test
 	@DisplayName("wait for scheduled upload of modified file")
-	public void uploadModified() throws IOException {
+	public void testUploadModified() throws IOException {
 		var in = Mockito.mock(InputStream.class);
 		Mockito.when(file.isDirty()).thenReturn(true);
 		Mockito.when(file.asPersistableStream()).thenReturn(in);
@@ -56,9 +56,9 @@ public class OpenFileUploaderTest {
 	}
 
 	@Test
-	@DisplayName("I/O error during upload")
-	public void uploadFails() {
-		var e = new IOException("fail.");
+	@DisplayName("Error during upload")
+	public void testFailingUpload() {
+		var e = new CloudProviderException("fail.");
 		Mockito.when(file.isDirty()).thenReturn(true);
 		Mockito.when(provider.write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
 

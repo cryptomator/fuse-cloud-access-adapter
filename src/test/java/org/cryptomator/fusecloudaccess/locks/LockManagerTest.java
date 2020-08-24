@@ -88,7 +88,7 @@ public class LockManagerTest {
 				});
 			}
 
-			Assertions.assertTimeoutPreemptively(Duration.ofSeconds(10), () -> { // deadlock protection
+			Assertions.assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
 				done.await();
 			});
 			Assertions.assertEquals(numThreads, maxCounter.get());
