@@ -87,10 +87,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		} catch (TimeoutException e) {
 			code = -ErrorCodes.ETIMEDOUT();
 		}
-		var errno = code == 0? null:Errno.valueOf(-code);
+		var errno = code >= 0? null:Errno.valueOf(-code);
 		var errName = errno == null? "OK":errno.name();
 		var errMsg = errno == null? "":errno.toString();
-		LOG.trace("{}() for {} returned with {}:{}.",methodCall, path, errName, errMsg);
+		LOG.trace("{}() for {} returned with ({}){}:{}.",methodCall, path, code, errName, errMsg);
 		return code;
 	}
 
