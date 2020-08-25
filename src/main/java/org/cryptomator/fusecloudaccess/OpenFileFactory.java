@@ -147,8 +147,8 @@ class OpenFileFactory {
 			return;
 		}
 		var file = handle.getFile();
-		if (file.released() == 0) {
-			synchronized (this) {
+		if (file.released() == 0 && activeFiles.containsKey(file.getPath())) {
+			synchronized (this) { //TODO: is this still needed? Due to the Path locks, there is only one altering thread at a time.
 				// transition from active to cached state
 				var path = handle.getFile().getPath();
 				activeFiles.remove(path);
