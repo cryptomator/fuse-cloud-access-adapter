@@ -41,7 +41,6 @@ import static java.nio.file.StandardOpenOption.WRITE;
 class OpenFile implements Closeable {
 
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFile.class);
-	private static final AtomicLong FILE_HANDLE_GEN = new AtomicLong();
 
 	private final Path tmpFilePath;
 	private final FileChannel fc;
@@ -67,10 +66,6 @@ class OpenFile implements Closeable {
 
 	CloudPath getPath() {
 		return path;
-	}
-
-	Path getTmpFilePath() {
-		return tmpFilePath;
 	}
 
 	int opened() {
