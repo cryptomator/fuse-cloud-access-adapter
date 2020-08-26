@@ -103,7 +103,7 @@ class OpenFileHandleTest {
 	public void testWriteFailsWithException() throws IOException {
 		var e = new CloudProviderException("fail");
 		Mockito.when(openFile.load(0, Long.MAX_VALUE)).thenReturn(CompletableFuture.completedFuture(fileChannel));
-		Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.anyLong(), Mockito.anyLong())).thenThrow(e);
+		Mockito.when(fileChannel.write(Mockito.any(), Mockito.anyLong())).thenThrow(e);
 
 		var futureResult = handle.write(buf, 1000l, 42l);
 		var thrown = Assertions.assertThrows(CloudProviderException.class, () -> {
@@ -131,15 +131,12 @@ class OpenFileHandleTest {
 			return null;
 		}).when(buf).get(Mockito.anyLong(), Mockito.any(byte[].class), Mockito.anyInt(), Mockito.anyInt());
 		Mockito.doAnswer(invocation -> {
-			ReadableByteChannel source = invocation.getArgument(0);
+			ByteBuffer source = invocation.getArgument(0);
 			long pos = invocation.getArgument(1);
-			long count = invocation.getArgument(2);
-			var tmp = ByteBuffer.allocate((int) count);
-			source.read(tmp);
-			tmp.flip();
-			tmp.get(transferred, (int) pos - 1000, (int) count);
+			int count = source.capacity();
+			source.get(transferred, (int) pos - 1000, count);
 			return count;
-		}).when(fileChannel).transferFrom(Mockito.any(), Mockito.anyLong(), Mockito.anyLong());
+		}).when(fileChannel).write(Mockito.any(), Mockito.anyLong());
 
 		var futureResult = handle.write(buf, 1000l, n);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());

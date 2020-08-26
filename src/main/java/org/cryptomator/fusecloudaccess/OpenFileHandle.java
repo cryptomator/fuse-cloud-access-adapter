@@ -5,6 +5,7 @@ import jnr.ffi.Pointer;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -78,8 +79,7 @@ class OpenFileHandle {
 					int n = (int) Math.min(BUFFER_SIZE, size - (pos - offset)); // int-cast: n <= BUFFER_SIZE
 					byte[] tmp = new byte[n];
 					buf.get(pos - offset, tmp, 0, n);
-					var in = new ByteArrayInputStream(tmp);
-					pos += fc.transferFrom(Channels.newChannel(in), pos, n);
+					pos += fc.write(ByteBuffer.wrap(tmp), pos);
 				}
 				int totalRead = (int) (pos - offset); // TODO: can we return long?
 				return CompletableFuture.completedFuture(totalRead);

@@ -41,7 +41,6 @@ import static java.nio.file.StandardOpenOption.WRITE;
 class OpenFile implements Closeable {
 
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFile.class);
-	private static final AtomicLong FILE_HANDLE_GEN = new AtomicLong();
 
 	private final Path tmpFilePath;
 	private final FileChannel fc;
@@ -67,10 +66,6 @@ class OpenFile implements Closeable {
 
 	CloudPath getPath() {
 		return path;
-	}
-
-	Path getTmpFilePath() {
-		return tmpFilePath;
 	}
 
 	int opened() {
@@ -123,23 +118,27 @@ class OpenFile implements Closeable {
 			return CompletableFuture.failedFuture(e);
 		}
 		var range = Range.closedOpen(offset, offset + count);
-		if (range.isEmpty() || populatedRanges.encloses(range)) {
-			return CompletableFuture.completedFuture(fc);
-		} else {
-			var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges);
-			return CompletableFuture.allOf(missingRanges.asRanges().stream().map(this::loadMissing).toArray(CompletableFuture[]::new)).thenApply(ignored -> fc);
+		synchronized (populatedRanges) { // required until https://github.com/google/guava/issues/3997 is fixed
+			if (range.isEmpty() || populatedRanges.encloses(range)) {
+				return CompletableFuture.completedFuture(fc);
+			} else {
+				var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges);
+				return CompletableFuture.allOf(missingRanges.asRanges().stream().map(this::loadMissing).toArray(CompletableFuture[]::new)).thenApply(ignored -> fc);
+			}
 		}
 	}
 
 	private CompletionStage<Void> loadMissing(Range<Long> range) {
-		assert !populatedRanges.intersects(range);
+		assert !populatedRanges.intersects(range); // synchronized by caller
 		long offset = range.lowerEndpoint();
 		long size = range.upperEndpoint() - range.lowerEndpoint();
 		return provider.read(path, offset, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
 			try (var ch = Channels.newChannel(in)) {
 				long transferred = fc.transferFrom(ch, offset, size);
 				var transferredRange = Range.closedOpen(offset, offset + transferred);
-				populatedRanges.add(transferredRange);
+				synchronized (populatedRanges) { // required until https://github.com/google/guava/issues/3997 is fixed
+					populatedRanges.add(transferredRange);
+				}
 				return CompletableFuture.completedFuture(null);
 			} catch (IOException e) {
 				return CompletableFuture.failedFuture(e);
