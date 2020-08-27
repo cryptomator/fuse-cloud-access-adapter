@@ -111,20 +111,20 @@ class OpenFile implements Closeable {
 		Preconditions.checkArgument(count >= 0);
 		Preconditions.checkState(fc.isOpen());
 		try {
-			if (offset > fc.size()) {
+			var size = fc.size();
+			if (offset > size) {
 				throw new EOFException("Requested range beyond EOF");
 			}
-		} catch (IOException e) {
-			return CompletableFuture.failedFuture(e);
-		}
-		var range = Range.closedOpen(offset, offset + count);
-		synchronized (populatedRanges) { // required until https://github.com/google/guava/issues/3997 is fixed
+			var upper = Math.min(size, offset + count);
+			var range = Range.closedOpen(offset, upper);
 			if (range.isEmpty() || populatedRanges.encloses(range)) {
 				return CompletableFuture.completedFuture(fc);
 			} else {
 				var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges);
 				return CompletableFuture.allOf(missingRanges.asRanges().stream().map(this::loadMissing).toArray(CompletableFuture[]::new)).thenApply(ignored -> fc);
 			}
+		} catch (IOException e) {
+			return CompletableFuture.failedFuture(e);
 		}
 	}
 
