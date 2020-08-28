@@ -61,6 +61,7 @@ class OpenFileFactory {
 					var cachedFile = cachedFiles.getIfPresent(p);
 					if (cachedFile != null) {
 						cachedFiles.invalidate(p);
+						cachedFile.updateLastModified(lastModified);
 						return cachedFile;
 					} else {
 						return this.createOpenFile(p, initialSize, lastModified);

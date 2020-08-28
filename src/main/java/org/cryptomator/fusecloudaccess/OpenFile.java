@@ -168,6 +168,10 @@ class OpenFile implements Closeable {
 		this.path = newPath;
 	}
 
+	void updateLastModified(Instant newLastModified) {
+		this.lastModified = newLastModified;
+	}
+
 	CloudItemMetadata getMetadata() {
 		Preconditions.checkState(fc.isOpen());
 		try {
