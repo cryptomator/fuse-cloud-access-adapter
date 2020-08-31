@@ -19,14 +19,12 @@ import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
-//TODO: fix tests
 public class OpenFileUploaderTest {
 
 	private CloudProvider provider;
 	private OpenFileUploader uploader;
 	private OpenFile file;
 	private CloudPath path;
-	private CloudPath fileName;
 
 	@TempDir
 	Path cacheDir;
@@ -37,7 +35,8 @@ public class OpenFileUploaderTest {
 		this.uploader = new OpenFileUploader(provider, cacheDir);
 		this.file = Mockito.mock(OpenFile.class);
 		this.path = Mockito.mock(CloudPath.class, "/path/in/cloud");
-		this.fileName = Mockito.mock(CloudPath.class, "cloud");
+
+		var fileName = Mockito.mock(CloudPath.class, "cloud");
 		Mockito.when(file.getPath()).thenReturn(path);
 		Mockito.when(path.getFileName()).thenReturn(fileName);
 		Mockito.when(fileName.toString()).thenReturn("cloud");
@@ -106,6 +105,7 @@ public class OpenFileUploaderTest {
 		var futureResult = uploader.scheduleUpload(file);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
+		Assertions.assertNull(result);
 		Assertions.assertTrue(isEmptyDir(cacheDir));
 	}
 
@@ -122,6 +122,7 @@ public class OpenFileUploaderTest {
 		var futureResult = uploader.scheduleUpload(file);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
+		Assertions.assertNull(result);
 		Assertions.assertTrue(isEmptyDir(cacheDir));
 	}
 
