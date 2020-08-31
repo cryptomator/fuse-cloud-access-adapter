@@ -67,6 +67,7 @@ public class OpenFileUploaderTest {
 
 		Assertions.assertNull(result);
 		Mockito.verify(provider).write(Mockito.eq(path), Mockito.eq(true), Mockito.any(), Mockito.any());
+		Mockito.verify(file).setDirty(false);
 	}
 
 	@Test
@@ -81,6 +82,7 @@ public class OpenFileUploaderTest {
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 		Assertions.assertNull(result);
+		Mockito.verify(file).setDirty(false);
 	}
 
 	@Test

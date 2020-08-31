@@ -10,8 +10,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
@@ -53,8 +53,8 @@ class OpenFileUploader {
 			return CompletableFuture.completedFuture(null);
 		}
 		try {
-			Path toUpload = cacheDir.resolve(file.getPath().getFileName().toString() + ".tmp");
-			Files.copy(file.asPersistableStream(), toUpload, StandardCopyOption.REPLACE_EXISTING);
+			Path toUpload = cacheDir.resolve(UUID.randomUUID() + ".tmp");
+			Files.copy(file.asPersistableStream(), toUpload);
 			file.setDirty(false);
 			return scheduleUpload(file.getPath(), Files.newInputStream(toUpload, StandardOpenOption.DELETE_ON_CLOSE));
 		} catch (IOException e) {
