@@ -61,7 +61,7 @@ public class OpenFileUploaderTest {
 			Files.createFile(invocation.getArgument(0));
 			return null;
 		}).when(file).persistTo(Mockito.any());
-		Mockito.when(provider.write(Mockito.eq(path), Mockito.eq(true), Mockito.eq(in), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(null));
+		Mockito.when(provider.write(Mockito.eq(path), Mockito.eq(true), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(null));
 
 		var futureResult = uploader.scheduleUpload(file);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
@@ -110,7 +110,7 @@ public class OpenFileUploaderTest {
 			Files.createFile(invocation.getArgument(0));
 			return null;
 		}).when(file).persistTo(Mockito.any());
-		Mockito.when(provider.write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
+		Mockito.when(provider.write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
 
 		var futureResult = uploader.scheduleUpload(file);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
@@ -129,7 +129,7 @@ public class OpenFileUploaderTest {
 			Files.createFile(invocation.getArgument(0));
 			return null;
 		}).when(file).persistTo(Mockito.any());
-		Mockito.when(provider.write(Mockito.eq(path), Mockito.eq(true), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(null));
+		Mockito.when(provider.write(Mockito.eq(path), Mockito.eq(true), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(null));
 
 		var futureResult = uploader.scheduleUpload(file);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
