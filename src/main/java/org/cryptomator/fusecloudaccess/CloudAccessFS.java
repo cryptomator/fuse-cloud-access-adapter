@@ -341,7 +341,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	private CompletionStage<Integer> createInternal(CloudPath path, long mode, FuseFileInfo fi) {
-		return provider.write(path, false, InputStream.nullInputStream(), ProgressListener.NO_PROGRESS_AWARE)
+		return provider.write(path, false, InputStream.nullInputStream(), 0l, ProgressListener.NO_PROGRESS_AWARE)
 				.handle((metadata, exception) -> {
 					if (exception == null) {
 						// no exception means: 0-byte file successfully created
@@ -501,7 +501,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 					// TODO append
 				}
 				ch.position(0);
-				return provider.write(path, true, Channels.newInputStream(ch), ProgressListener.NO_PROGRESS_AWARE).thenApply(ignored -> 0);
+				return provider.write(path, true, Channels.newInputStream(ch), size, ProgressListener.NO_PROGRESS_AWARE).thenApply(ignored -> 0);
 			} catch (IOException e) {
 				return CompletableFuture.failedFuture(e);
 			}

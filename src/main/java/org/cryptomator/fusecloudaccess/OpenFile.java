@@ -184,4 +184,9 @@ class OpenFile implements Closeable {
 			fc.transferTo(0, fc.size(), dst);
 		}
 	}
+
+	public long getSize() throws IOException {
+		Preconditions.checkState(fc.isOpen());
+		return fc.size();
+	}
 }

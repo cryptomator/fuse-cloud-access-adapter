@@ -55,18 +55,20 @@ class OpenFileUploader {
 			Path toUpload = cacheDir.resolve(UUID.randomUUID() + ".tmp");
 			file.persistTo(toUpload);
 			file.setDirty(false);
-			return scheduleUpload(file, Files.newInputStream(toUpload, StandardOpenOption.DELETE_ON_CLOSE));
+			var size = Files.size(toUpload);
+			var in = Files.newInputStream(toUpload, StandardOpenOption.DELETE_ON_CLOSE);
+			return scheduleUpload(file, in, size);
 		} catch (IOException e) {
 			LOG.error("Upload of " + file.getPath() + " failed.", e);
 			return CompletableFuture.failedFuture(e);
 		}
 	}
 
-	private CompletionStage<Void> scheduleUpload(OpenFile file, InputStream in) {
+	private CompletionStage<Void> scheduleUpload(OpenFile file, InputStream in, long size) {
 		var path = file.getPath();
 		LOG.debug("uploading {}...", path);
 		long id = idGenerator.incrementAndGet();
-		var task = provider.write(path, true, in, ProgressListener.NO_PROGRESS_AWARE)
+		var task = provider.write(path, true, in, size, ProgressListener.NO_PROGRESS_AWARE)
 				.thenRun(() -> {
 					LOG.debug("uploaded successfully: {}", path);
 				}).exceptionally(e -> {
