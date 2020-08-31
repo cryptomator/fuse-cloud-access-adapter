@@ -40,7 +40,7 @@ public class OpenFileUploaderTest {
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 		Assertions.assertNull(result);
-		Mockito.verify(provider, Mockito.never()).write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.any());
+		Mockito.verify(provider, Mockito.never()).write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.anyLong(), Mockito.any());
 	}
 
 	@Test
@@ -49,13 +49,13 @@ public class OpenFileUploaderTest {
 		var in = Mockito.mock(InputStream.class);
 		Mockito.when(file.isDirty()).thenReturn(true);
 		Mockito.when(file.asPersistableStream()).thenReturn(in);
-		Mockito.when(provider.write(Mockito.eq(path), Mockito.eq(true), Mockito.eq(in), Mockito.any())).thenReturn(CompletableFuture.completedFuture(null));
+		Mockito.when(provider.write(Mockito.eq(path), Mockito.eq(true), Mockito.eq(in), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(null));
 
 		var futureResult = uploader.scheduleUpload(file);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 		Assertions.assertNull(result);
-		Mockito.verify(provider).write(Mockito.eq(path), Mockito.eq(true), Mockito.eq(in), Mockito.any());
+		Mockito.verify(provider).write(Mockito.eq(path), Mockito.eq(true), Mockito.eq(in), Mockito.anyLong(), Mockito.any());
 	}
 
 	@Test
@@ -63,7 +63,7 @@ public class OpenFileUploaderTest {
 	public void testFailingUpload() {
 		var e = new CloudProviderException("fail.");
 		Mockito.when(file.isDirty()).thenReturn(true);
-		Mockito.when(provider.write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
+		Mockito.when(provider.write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
 
 		var futureResult = uploader.scheduleUpload(file);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
@@ -97,8 +97,8 @@ public class OpenFileUploaderTest {
 			Mockito.when(file2.getPath()).thenReturn(path2);
 			Mockito.when(file1.isDirty()).thenReturn(true);
 			Mockito.when(file2.isDirty()).thenReturn(true);
-			Mockito.when(provider.write(Mockito.eq(path1), Mockito.anyBoolean(), Mockito.any(), Mockito.any())).thenReturn(upload1);
-			Mockito.when(provider.write(Mockito.eq(path2), Mockito.anyBoolean(), Mockito.any(), Mockito.any())).thenReturn(upload2);
+			Mockito.when(provider.write(Mockito.eq(path1), Mockito.anyBoolean(), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(upload1);
+			Mockito.when(provider.write(Mockito.eq(path2), Mockito.anyBoolean(), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(upload2);
 			uploader.scheduleUpload(file1);
 			uploader.scheduleUpload(file2);
 		}

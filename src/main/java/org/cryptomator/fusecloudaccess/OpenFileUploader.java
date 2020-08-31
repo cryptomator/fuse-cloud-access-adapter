@@ -32,19 +32,19 @@ class OpenFileUploader {
 		}
 		try {
 			var in = file.asPersistableStream();
-			return scheduleUpload(file, in);
+			return scheduleUpload(file, in, file.getSize());
 		} catch (IOException e) {
 			LOG.error("Upload of " + file.getPath() + " failed.", e);
 			return CompletableFuture.failedFuture(e);
 		}
 	}
 
-	private CompletionStage<Void> scheduleUpload(OpenFile file, InputStream in) {
+	private CompletionStage<Void> scheduleUpload(OpenFile file, InputStream in, long size) {
 		assert file.isDirty();
 		var path = file.getPath();
 		LOG.debug("uploading {}...", path);
 		long id = idGenerator.incrementAndGet();
-		var task = provider.write(path, true, in, ProgressListener.NO_PROGRESS_AWARE)
+		var task = provider.write(path, true, in, size, ProgressListener.NO_PROGRESS_AWARE)
 				.thenRun(() -> {
 					LOG.debug("uploaded successfully: {}", path);
 					file.setDirty(false);

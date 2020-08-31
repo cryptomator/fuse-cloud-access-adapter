@@ -31,7 +31,6 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 
 import static java.nio.file.StandardOpenOption.CREATE_NEW;
 import static java.nio.file.StandardOpenOption.READ;
@@ -185,5 +184,10 @@ class OpenFile implements Closeable {
 		Preconditions.checkState(fc.isOpen());
 		fc.position(0);
 		return new UnclosableInputStream(Channels.newInputStream(fc));
+	}
+
+	public long getSize() throws IOException {
+		Preconditions.checkState(fc.isOpen());
+		return fc.size();
 	}
 }
