@@ -16,7 +16,6 @@ import org.slf4j.LoggerFactory;
 import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
@@ -31,7 +30,6 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 
 import static java.nio.file.StandardOpenOption.CREATE_NEW;
 import static java.nio.file.StandardOpenOption.READ;
@@ -89,7 +87,7 @@ class OpenFile implements Closeable {
 	}
 
 	@Override
-	public void close() {
+	public synchronized void close() {
 		try {
 			fc.close();
 			Files.delete(tmpFilePath);
@@ -181,9 +179,9 @@ class OpenFile implements Closeable {
 		}
 	}
 
-	public InputStream asPersistableStream() throws IOException {
-		Preconditions.checkState(fc.isOpen());
-		fc.position(0);
-		return new UnclosableInputStream(Channels.newInputStream(fc));
+	synchronized void persistTo(Path destination) throws IOException {
+		try (WritableByteChannel dst = Files.newByteChannel(destination, CREATE_NEW, WRITE)) {
+			fc.transferTo(0, fc.size(), dst);
+		}
 	}
 }

@@ -53,7 +53,7 @@ class OpenFileUploader {
 		}
 		try {
 			Path toUpload = cacheDir.resolve(UUID.randomUUID() + ".tmp");
-			Files.copy(file.asPersistableStream(), toUpload);
+			file.persistTo(toUpload);
 			file.setDirty(false);
 			return scheduleUpload(file, Files.newInputStream(toUpload, StandardOpenOption.DELETE_ON_CLOSE));
 		} catch (IOException e) {

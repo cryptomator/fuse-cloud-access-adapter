@@ -12,7 +12,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -57,9 +56,12 @@ public class OpenFileUploaderTest {
 	@Test
 	@DisplayName("wait for scheduled upload of modified file")
 	public void testUploadModified() throws IOException {
-		var in = Mockito.mock(InputStream.class);
+
 		Mockito.when(file.isDirty()).thenReturn(true);
-		Mockito.when(file.asPersistableStream()).thenReturn(in);
+		Mockito.doAnswer(invocation -> {
+			Files.createFile(invocation.getArgument(0));
+			return null;
+		}).when(file).persistTo(Mockito.any());
 		Mockito.when(provider.write(Mockito.eq(path), Mockito.eq(true), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(null));
 
 		var futureResult = uploader.scheduleUpload(file);
@@ -75,7 +77,10 @@ public class OpenFileUploaderTest {
 	public void testFailingUpload() throws IOException {
 		var e = new CloudProviderException("fail.");
 		Mockito.when(file.isDirty()).thenReturn(true);
-		Mockito.when(file.asPersistableStream()).thenReturn(InputStream.nullInputStream());
+		Mockito.doAnswer(invocation -> {
+			Files.createFile(invocation.getArgument(0));
+			return null;
+		}).when(file).persistTo(Mockito.any());
 		Mockito.when(provider.write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
 
 		var futureResult = uploader.scheduleUpload(file);
@@ -102,7 +107,10 @@ public class OpenFileUploaderTest {
 
 		var e = new CloudProviderException("fail.");
 		Mockito.when(file.isDirty()).thenReturn(true);
-		Mockito.when(file.asPersistableStream()).thenReturn(InputStream.nullInputStream());
+		Mockito.doAnswer(invocation -> {
+			Files.createFile(invocation.getArgument(0));
+			return null;
+		}).when(file).persistTo(Mockito.any());
 		Mockito.when(provider.write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
 
 		var futureResult = uploader.scheduleUpload(file);
@@ -117,9 +125,11 @@ public class OpenFileUploaderTest {
 	public void testTempDirIsClearedOnSuccess() throws IOException {
 		assert isEmptyDir(cacheDir);
 
-		var in = Mockito.mock(InputStream.class);
 		Mockito.when(file.isDirty()).thenReturn(true);
-		Mockito.when(file.asPersistableStream()).thenReturn(in);
+		Mockito.doAnswer(invocation -> {
+			Files.createFile(invocation.getArgument(0));
+			return null;
+		}).when(file).persistTo(Mockito.any());
 		Mockito.when(provider.write(Mockito.eq(path), Mockito.eq(true), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(null));
 
 		var futureResult = uploader.scheduleUpload(file);
@@ -158,8 +168,14 @@ public class OpenFileUploaderTest {
 			Mockito.when(file2.getPath()).thenReturn(path2);
 			Mockito.when(file1.isDirty()).thenReturn(true);
 			Mockito.when(file2.isDirty()).thenReturn(true);
-			Mockito.when(file1.asPersistableStream()).thenReturn(InputStream.nullInputStream());
-			Mockito.when(file2.asPersistableStream()).thenReturn(InputStream.nullInputStream());
+			Mockito.doAnswer(invocation -> {
+				Files.createFile(invocation.getArgument(0));
+				return null;
+			}).when(file1).persistTo(Mockito.any());
+			Mockito.doAnswer(invocation -> {
+				Files.createFile(invocation.getArgument(0));
+				return null;
+			}).when(file2).persistTo(Mockito.any());
 			Mockito.when(provider.write(Mockito.eq(path1), Mockito.anyBoolean(), Mockito.any(), Mockito.any())).thenReturn(upload1);
 			Mockito.when(provider.write(Mockito.eq(path2), Mockito.anyBoolean(), Mockito.any(), Mockito.any())).thenReturn(upload2);
 			uploader.scheduleUpload(file1);
