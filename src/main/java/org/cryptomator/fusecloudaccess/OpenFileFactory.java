@@ -38,7 +38,7 @@ class OpenFileFactory {
 	private final Path cacheDir;
 
 	public OpenFileFactory(CloudProvider provider, Path cacheDir) {
-		this(provider, new OpenFileUploader(provider), cacheDir);
+		this(provider, new OpenFileUploader(provider, cacheDir), cacheDir);
 	}
 
 	// visible for testing
