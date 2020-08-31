@@ -83,6 +83,7 @@ public class OpenFileUploaderTest {
 
 		Assertions.assertNull(result);
 		Mockito.verify(file).setDirty(false);
+		Mockito.verify(file).setDirty(true);
 	}
 
 	@Test

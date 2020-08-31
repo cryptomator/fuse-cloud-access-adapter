@@ -1,6 +1,5 @@
 package org.cryptomator.fusecloudaccess;
 
-import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.slf4j.Logger;
@@ -56,14 +55,15 @@ class OpenFileUploader {
 			Path toUpload = cacheDir.resolve(UUID.randomUUID() + ".tmp");
 			Files.copy(file.asPersistableStream(), toUpload);
 			file.setDirty(false);
-			return scheduleUpload(file.getPath(), Files.newInputStream(toUpload, StandardOpenOption.DELETE_ON_CLOSE));
+			return scheduleUpload(file, Files.newInputStream(toUpload, StandardOpenOption.DELETE_ON_CLOSE));
 		} catch (IOException e) {
 			LOG.error("Upload of " + file.getPath() + " failed.", e);
 			return CompletableFuture.failedFuture(e);
 		}
 	}
 
-	private CompletionStage<Void> scheduleUpload(CloudPath path, InputStream in) {
+	private CompletionStage<Void> scheduleUpload(OpenFile file, InputStream in) {
+		var path = file.getPath();
 		LOG.debug("uploading {}...", path);
 		long id = idGenerator.incrementAndGet();
 		var task = provider.write(path, true, in, ProgressListener.NO_PROGRESS_AWARE)
@@ -72,6 +72,7 @@ class OpenFileUploader {
 				}).exceptionally(e -> {
 					LOG.error("Upload of " + path + " failed.", e);
 					// TODO copy file to some lost+found dir
+					file.setDirty(true); // might cause an additional upload
 					return null;
 				}).thenRun(() -> {
 					scheduledUploads.remove(id);
