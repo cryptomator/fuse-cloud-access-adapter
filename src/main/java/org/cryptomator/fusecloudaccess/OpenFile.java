@@ -115,11 +115,13 @@ class OpenFile implements Closeable {
 			}
 			var upper = Math.min(size, offset + count);
 			var range = Range.closedOpen(offset, upper);
-			if (range.isEmpty() || populatedRanges.encloses(range)) {
-				return CompletableFuture.completedFuture(fc);
-			} else {
-				var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges);
-				return CompletableFuture.allOf(missingRanges.asRanges().stream().map(this::loadMissing).toArray(CompletableFuture[]::new)).thenApply(ignored -> fc);
+			synchronized (populatedRanges) {
+				if (range.isEmpty() || populatedRanges.encloses(range)) {
+					return CompletableFuture.completedFuture(fc);
+				} else {
+					var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges);
+					return CompletableFuture.allOf(missingRanges.asRanges().stream().map(this::loadMissing).toArray(CompletableFuture[]::new)).thenApply(ignored -> fc);
+				}
 			}
 		} catch (IOException e) {
 			return CompletableFuture.failedFuture(e);
@@ -134,7 +136,7 @@ class OpenFile implements Closeable {
 			try (var ch = Channels.newChannel(in)) {
 				long transferred = fc.transferFrom(ch, offset, size);
 				var transferredRange = Range.closedOpen(offset, offset + transferred);
-				synchronized (populatedRanges) { // required until https://github.com/google/guava/issues/3997 is fixed
+				synchronized (populatedRanges) {
 					populatedRanges.add(transferredRange);
 				}
 				return CompletableFuture.completedFuture(null);
