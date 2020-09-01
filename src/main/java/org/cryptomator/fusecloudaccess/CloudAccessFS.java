@@ -47,18 +47,25 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	private final CloudProvider provider;
 	private final int timeoutMillis;
+	private final OpenFileUploader openFileUploader;
 	private final OpenFileFactory openFileFactory;
 	private final OpenDirFactory openDirFactory;
 	private final LockManager lockManager;
 
+	// TODO: use DI instead of constructor madness
 	public CloudAccessFS(CloudProvider provider, Path cacheDir, int timeoutMillis) {
-		this(provider, timeoutMillis, new OpenFileFactory(provider, cacheDir), new OpenDirFactory(provider), new LockManager());
+		this(provider, cacheDir, timeoutMillis, new OpenFileUploader(provider, cacheDir));
+	}
+
+	private CloudAccessFS(CloudProvider provider, Path cacheDir, int timeoutMillis, OpenFileUploader openFileUploader) {
+		this(provider, timeoutMillis, openFileUploader, new OpenFileFactory(provider, openFileUploader, cacheDir), new OpenDirFactory(provider), new LockManager());
 	}
 
 	//Visible for testing
-	CloudAccessFS(CloudProvider provider, int timeoutMillis, OpenFileFactory openFileFactory, OpenDirFactory openDirFactory, LockManager lockManager) {
+	CloudAccessFS(CloudProvider provider, int timeoutMillis, OpenFileUploader openFileUploader, OpenFileFactory openFileFactory, OpenDirFactory openDirFactory, LockManager lockManager) {
 		this.provider = provider;
 		this.timeoutMillis = timeoutMillis;
+		this.openFileUploader = openFileUploader;
 		this.openFileFactory = openFileFactory;
 		this.openDirFactory = openDirFactory;
 		this.lockManager = lockManager;
@@ -529,5 +536,13 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			LOG.error("ftruncate() failed", e);
 			return -ErrorCodes.EIO();
 		});
+	}
+
+	@Override
+	public void umount() {
+		super.umount();
+		LOG.debug("Waiting for pending uploads...");
+		openFileUploader.awaitPendingUploads().toCompletableFuture().join();
+		LOG.debug("All done.");
 	}
 }

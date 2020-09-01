@@ -49,6 +49,7 @@ public class CloudAccessFSTest {
 
 	private CloudAccessFS cloudFs;
 	private CloudProvider provider;
+	private OpenFileUploader uploader;
 	private OpenFileFactory fileFactory;
 	private OpenDirFactory dirFactory;
 	private LockManager lockManager;
@@ -67,10 +68,11 @@ public class CloudAccessFSTest {
 	@BeforeEach
 	public void setup() {
 		provider = Mockito.mock(CloudProvider.class);
+		uploader = Mockito.mock(OpenFileUploader.class);
 		fileFactory = Mockito.mock(OpenFileFactory.class);
 		dirFactory = Mockito.mock(OpenDirFactory.class);
 		lockManager = Mockito.mock(LockManager.class);
-		cloudFs = new CloudAccessFS(provider, CloudAccessFSTest.TIMEOUT, fileFactory, dirFactory, lockManager);
+		cloudFs = new CloudAccessFS(provider, CloudAccessFSTest.TIMEOUT, uploader, fileFactory, dirFactory, lockManager);
 
 		pathLockBuilder = Mockito.mock(PathLockBuilder.class);
 		pathLock = Mockito.mock(PathLock.class);
