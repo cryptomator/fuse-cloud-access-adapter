@@ -112,9 +112,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int getattr(String path, FileStat stat) {
-		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForReading()) {
 			var returnCode = getattrInternal(CloudPath.of(path), stat);
+			LOG.trace("getattr {} (modified: {}.{}, size: {})", path, stat.st_mtim.tv_sec, stat.st_mtim.tv_nsec, stat.st_size);
 			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("getattr() failed", e);
@@ -128,11 +129,11 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			Attributes.copy(cachedMetadata.get(), stat);
 			return CompletableFuture.completedFuture(0);
 		}
-		return provider.itemMetadata(path)
+		return provider.itemMetadata(path) //
 				.thenApply(metadata -> {
 					Attributes.copy(metadata, stat);
 					return 0;
-				})
+				}) //
 				.exceptionally(e -> {
 					if (e instanceof NotFoundException) {
 						return -ErrorCodes.ENOENT();
@@ -145,9 +146,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int opendir(String path, FuseFileInfo fi) {
-		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForReading()) {
 			var returnCode = opendirInternal(CloudPath.of(path), fi);
+			LOG.trace("opendir {} (handle: {})", path, fi.fh.get());
 			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("opendir() failed", e);
@@ -156,7 +158,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	private CompletionStage<Integer> opendirInternal(CloudPath path, FuseFileInfo fi) {
-		return provider.itemMetadata(path)
+		return provider.itemMetadata(path) //
 				.thenApply(metadata -> {
 					if (metadata.getItemType() == CloudItemType.FOLDER) {
 						long dirHandle = openDirFactory.open(path);
@@ -165,7 +167,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 					} else {
 						return -ErrorCodes.ENOTDIR();
 					}
-				})
+				}) //
 				.exceptionally(e -> {
 					if (e instanceof NotFoundException) {
 						return -ErrorCodes.ENOENT();
@@ -178,9 +180,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int readdir(String path, Pointer buf, FuseFillDir filler, long offset, FuseFileInfo fi) {
-		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForReading()) {
 			var returnCode = readdirInternal(CloudPath.of(path), buf, filler, offset, fi);
+			LOG.trace("readdir {} (handle: {}, offset: {})", path, fi.fh.get(), offset);
 			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("readdir() failed", e);
@@ -213,9 +216,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int releasedir(String path, FuseFileInfo fi) {
-		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForReading()) {
 			openDirFactory.close(fi.fh.get());
+			LOG.trace("releasedir {} (handle: {})", path, fi.fh.get());
 			return 0;
 		} catch (Exception e) {
 			LOG.error("releasedir() failed", e);
@@ -225,9 +229,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int open(String path, FuseFileInfo fi) {
-		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForReading()) {
 			var returnCode = openInternal(CloudPath.of(path), fi);
+			LOG.trace("open {} (handle: {})", path, fi.fh.get());
 			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("open() failed", e);
@@ -236,7 +241,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	private CompletionStage<Integer> openInternal(CloudPath path, FuseFileInfo fi) {
-		return provider.itemMetadata(path)
+		return provider.itemMetadata(path) //
 				.thenApply(metadata -> {
 					final var type = metadata.getItemType();
 					if (type == CloudItemType.FILE) {
@@ -255,7 +260,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 						LOG.error("Attempted to open() {}, which is not a file.", path);
 						return -ErrorCodes.EIO();
 					}
-				})
+				}) //
 				.exceptionally(e -> {
 					if (e instanceof NotFoundException) {
 						return -ErrorCodes.ENOENT();
@@ -268,9 +273,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int release(String path, FuseFileInfo fi) {
-		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForReading()) {
 			openFileFactory.close(fi.fh.get());
+			LOG.trace("release {} (handle: {})", path, fi.fh.get());
 			return 0;
 		} catch (Exception e) {
 			LOG.error("release() failed", e);
@@ -280,11 +286,12 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int rename(String oldpath, String newpath) {
-		try (PathLock oldPathLock = lockManager.createPathLock(oldpath).forWriting();
-			 DataLock oldDataLock = oldPathLock.lockDataForWriting();
-			 PathLock newPathLock = lockManager.createPathLock(newpath).forWriting();
+		try (PathLock oldPathLock = lockManager.createPathLock(oldpath).forWriting(); //
+			 DataLock oldDataLock = oldPathLock.lockDataForWriting(); //
+			 PathLock newPathLock = lockManager.createPathLock(newpath).forWriting(); //
 			 DataLock newDataLock = newPathLock.lockDataForWriting()) {
 			var returnCode = renameInternal(CloudPath.of(oldpath), CloudPath.of(newpath));
+			LOG.trace("rename {} to {}", oldpath, newpath);
 			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("rename() failed", e);
@@ -293,11 +300,11 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	private CompletionStage<Integer> renameInternal(CloudPath oldPath, CloudPath newPath) {
-		return provider.move(oldPath, newPath, true)
+		return provider.move(oldPath, newPath, true) //
 				.thenApply(p -> {
 					openFileFactory.moved(oldPath, newPath);
 					return 0;
-				})
+				}) //
 				.exceptionally(e -> {
 					if (e instanceof NotFoundException) {
 						return -ErrorCodes.ENOENT();
@@ -312,9 +319,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int mkdir(String path, long mode) {
-		try (PathLock pathLock = lockManager.createPathLock(path).forWriting();
+		try (PathLock pathLock = lockManager.createPathLock(path).forWriting(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
 			var returnCode = mkdirInternal(CloudPath.of(path), mode);
+			LOG.trace("mkdir {} (mode: {})", path, mode);
 			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("mkdir() failed", e);
@@ -323,8 +331,8 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	private CompletionStage<Integer> mkdirInternal(CloudPath path, long mode) {
-		return provider.createFolder(path)
-				.thenApply(p -> 0)
+		return provider.createFolder(path) //
+				.thenApply(p -> 0) //
 				.exceptionally(e -> {
 					if (e instanceof AlreadyExistsException) {
 						return -ErrorCodes.EEXIST();
@@ -337,9 +345,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int create(String path, long mode, FuseFileInfo fi) {
-		try (PathLock pathLock = lockManager.createPathLock(path).forWriting();
+		try (PathLock pathLock = lockManager.createPathLock(path).forWriting(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
 			var returnCode = createInternal(CloudPath.of(path), mode, fi);
+			LOG.trace("create {} (handle: {}, mode: {})", path, fi.fh.get(), mode);
 			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("create() failed", e);
@@ -348,7 +357,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	private CompletionStage<Integer> createInternal(CloudPath path, long mode, FuseFileInfo fi) {
-		return provider.write(path, false, InputStream.nullInputStream(), 0l, ProgressListener.NO_PROGRESS_AWARE)
+		return provider.write(path, false, InputStream.nullInputStream(), 0l, ProgressListener.NO_PROGRESS_AWARE) //
 				.handle((metadata, exception) -> {
 					if (exception == null) {
 						// no exception means: 0-byte file successfully created
@@ -359,8 +368,8 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 					} else {
 						return CompletableFuture.<CloudItemMetadata>failedFuture(exception);
 					}
-				})
-				.thenCompose(Function.identity())
+				}) //
+				.thenCompose(Function.identity()) //
 				.thenApply(metadata -> {
 					try {
 						var size = metadata.getSize().orElse(0l);
@@ -371,7 +380,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 					} catch (IOException e) {
 						return -ErrorCodes.EIO();
 					}
-				})
+				}) //
 				.exceptionally(e -> {
 					if (e instanceof NotFoundException) {
 						return -ErrorCodes.ENOENT();
@@ -387,14 +396,16 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	@Override
 	public int chmod(String path, long mode) {
 		// TODO: This must be implemented! Otherwise TextEdit.app fails to save text files.
+		LOG.trace("chmod {} (mode: {})", path, mode);
 		return 0;
 	}
 
 	@Override
 	public int rmdir(String path) {
-		try (PathLock pathLock = lockManager.createPathLock(path.toString()).forWriting();
+		try (PathLock pathLock = lockManager.createPathLock(path.toString()).forWriting(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
 			var returnCode = deleteInternal(CloudPath.of(path));
+			LOG.trace("rmdir {}", path);
 			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("rmdir() failed", e);
@@ -404,9 +415,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int unlink(String path) {
-		try (PathLock pathLock = lockManager.createPathLock(path.toString()).forWriting();
+		try (PathLock pathLock = lockManager.createPathLock(path.toString()).forWriting(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
 			var returnCode = deleteInternal(CloudPath.of(path));
+			LOG.trace("unlink {}", path);
 			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("unlink() failed", e);
@@ -416,11 +428,11 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	// visible for testing
 	CompletionStage<Integer> deleteInternal(CloudPath path) {
-		return provider.delete(path)
+		return provider.delete(path) //
 				.thenApply(ignored -> {
 					openFileFactory.delete(path);
 					return 0;
-				})
+				}) //
 				.exceptionally(e -> {
 					if (e instanceof NotFoundException) {
 						return -ErrorCodes.ENOENT();
@@ -433,9 +445,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int read(String path, Pointer buf, long size, long offset, FuseFileInfo fi) {
-		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForReading()) {
 			var returnCode = readInternal(fi.fh.get(), buf, size, offset);
+			LOG.trace("read {} (handle: {}, size: {}, offset: {})", path, fi.fh.get(), size, offset);
 			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("read() failed", e);
@@ -462,9 +475,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int write(String path, Pointer buf, long size, long offset, FuseFileInfo fi) {
-		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
 			var returnCode = writeInternal(fi.fh.get(), buf, size, offset);
+			LOG.trace("write {} (handle: {}, size: {}, offset: {})", path, fi.fh.get(), size, offset);
 			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("write() failed", e);
@@ -489,9 +503,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int truncate(String path, long size) {
-		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
 			var returnCode = truncateInternal(CloudPath.of(path), size);
+			LOG.trace("truncate {} (size: {})", path, size);
 			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("truncate() failed", e);
@@ -517,9 +532,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int ftruncate(String path, long size, FuseFileInfo fi) {
-		try (PathLock pathLock = lockManager.createPathLock(path).forReading();
+		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
 			var returnCode = ftruncateInternal(fi.fh.get(), size);
+			LOG.trace("ftruncate {} (handle: {}, size: {}", path, fi.fh.get(), size);
 			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("ftruncate() failed", e);
