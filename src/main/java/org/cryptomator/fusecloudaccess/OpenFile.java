@@ -16,7 +16,6 @@ import org.slf4j.LoggerFactory;
 import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
@@ -31,7 +30,6 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 
 import static java.nio.file.StandardOpenOption.CREATE_NEW;
 import static java.nio.file.StandardOpenOption.READ;
@@ -41,7 +39,6 @@ import static java.nio.file.StandardOpenOption.WRITE;
 class OpenFile implements Closeable {
 
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFile.class);
-	private static final AtomicLong FILE_HANDLE_GEN = new AtomicLong();
 
 	private final Path tmpFilePath;
 	private final FileChannel fc;
@@ -69,10 +66,6 @@ class OpenFile implements Closeable {
 		return path;
 	}
 
-	Path getTmpFilePath() {
-		return tmpFilePath;
-	}
-
 	int opened() {
 		return openFileHandles.incrementAndGet();
 	}
@@ -94,7 +87,7 @@ class OpenFile implements Closeable {
 	}
 
 	@Override
-	public void close() {
+	public synchronized void close() {
 		try {
 			fc.close();
 			Files.delete(tmpFilePath);
@@ -116,30 +109,36 @@ class OpenFile implements Closeable {
 		Preconditions.checkArgument(count >= 0);
 		Preconditions.checkState(fc.isOpen());
 		try {
-			if (offset > fc.size()) {
+			var size = fc.size();
+			if (offset > size) {
 				throw new EOFException("Requested range beyond EOF");
+			}
+			var upper = Math.min(size, offset + count);
+			var range = Range.closedOpen(offset, upper);
+			synchronized (populatedRanges) {
+				if (range.isEmpty() || populatedRanges.encloses(range)) {
+					return CompletableFuture.completedFuture(fc);
+				} else {
+					var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges);
+					return CompletableFuture.allOf(missingRanges.asRanges().stream().map(this::loadMissing).toArray(CompletableFuture[]::new)).thenApply(ignored -> fc);
+				}
 			}
 		} catch (IOException e) {
 			return CompletableFuture.failedFuture(e);
 		}
-		var range = Range.closedOpen(offset, offset + count);
-		if (range.isEmpty() || populatedRanges.encloses(range)) {
-			return CompletableFuture.completedFuture(fc);
-		} else {
-			var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges);
-			return CompletableFuture.allOf(missingRanges.asRanges().stream().map(this::loadMissing).toArray(CompletableFuture[]::new)).thenApply(ignored -> fc);
-		}
 	}
 
 	private CompletionStage<Void> loadMissing(Range<Long> range) {
-		assert !populatedRanges.intersects(range);
+		assert !populatedRanges.intersects(range); // synchronized by caller
 		long offset = range.lowerEndpoint();
 		long size = range.upperEndpoint() - range.lowerEndpoint();
 		return provider.read(path, offset, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
 			try (var ch = Channels.newChannel(in)) {
 				long transferred = fc.transferFrom(ch, offset, size);
 				var transferredRange = Range.closedOpen(offset, offset + transferred);
-				populatedRanges.add(transferredRange);
+				synchronized (populatedRanges) {
+					populatedRanges.add(transferredRange);
+				}
 				return CompletableFuture.completedFuture(null);
 			} catch (IOException e) {
 				return CompletableFuture.failedFuture(e);
@@ -169,6 +168,10 @@ class OpenFile implements Closeable {
 		this.path = newPath;
 	}
 
+	void updateLastModified(Instant newLastModified) {
+		this.lastModified = newLastModified;
+	}
+
 	CloudItemMetadata getMetadata() {
 		Preconditions.checkState(fc.isOpen());
 		try {
@@ -178,9 +181,14 @@ class OpenFile implements Closeable {
 		}
 	}
 
-	public InputStream asPersistableStream() throws IOException {
+	synchronized void persistTo(Path destination) throws IOException {
+		try (WritableByteChannel dst = Files.newByteChannel(destination, CREATE_NEW, WRITE)) {
+			fc.transferTo(0, fc.size(), dst);
+		}
+	}
+
+	public long getSize() throws IOException {
 		Preconditions.checkState(fc.isOpen());
-		fc.position(0);
-		return new UnclosableInputStream(Channels.newInputStream(fc));
+		return fc.size();
 	}
 }

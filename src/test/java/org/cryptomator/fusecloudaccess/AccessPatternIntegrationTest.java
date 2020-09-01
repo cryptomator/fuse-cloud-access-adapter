@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Arrays;
 
 import static java.nio.charset.StandardCharsets.US_ASCII;
@@ -49,7 +50,7 @@ public class AccessPatternIntegrationTest {
 	}
 
 	@Test
-	//@Disabled // requires java.library.path to be set
+	@Disabled // requires java.library.path to be set
 	@DisplayName("simulate TextEdit.app's access pattern during save")
 	void testAppleAutosaveAccessPattern() throws IOException, InterruptedException {
 		// echo "asd" > foo.txt
@@ -75,9 +76,11 @@ public class AccessPatternIntegrationTest {
 		TestFileStat stat2 = TestFileStat.create();
 		fs.getattr("/foo.txt", stat1);
 		fs.getattr("/foo.txt-temp3000/foo.txt", stat2);
+		Instant modTime1 = Instant.ofEpochSecond(stat1.st_mtim.tv_sec.longValue(), stat1.st_mtim.tv_nsec.longValue());
+		Instant modTime2 = Instant.ofEpochSecond(stat2.st_mtim.tv_sec.longValue(), stat2.st_mtim.tv_nsec.longValue());
 		Assertions.assertEquals(3, stat1.st_size.intValue());
 		Assertions.assertEquals(6, stat2.st_size.intValue());
-		Assertions.assertTrue(stat1.st_mtim.tv_nsec.longValue() < stat2.st_mtim.tv_nsec.longValue(), "modified date of stat1 is before stat2");
+		Assertions.assertTrue(modTime1.isBefore(modTime2), "modified date of stat1 is before stat2");
 
 		// mv foo.txt foo.txt-temp3001
 		fs.rename("/foo.txt", "/foo.txt-temp3001");
@@ -106,27 +109,27 @@ public class AccessPatternIntegrationTest {
 	}
 
 	@Test
-	//@Disabled // requires java.library.path to be set
+	@Disabled // requires java.library.path to be set
 	@DisplayName("simulates Notepad's access pattern during save of a new File")
 	void testWindowsNotepadSavePatternForNewFiles() {
 		FuseFileInfo fi1 = TestFileInfo.create();
 		FileStat stat = TestFileStat.create();
 		String p = "/foo.txt";
-		int code = fs.getattr(p,stat);
+		int code = fs.getattr(p, stat);
 
 		assert code == -ErrorCodes.ENOENT();
 
-		fs.create(p,0644,fi1);
-		fs.release(p,fi1);
+		fs.create(p, 0644, fi1);
+		fs.release(p, fi1);
 
 		FuseFileInfo fi2 = TestFileInfo.create();
-		fs.open(p,fi2);
+		fs.open(p, fi2);
 		fs.unlink(p);
-		fs.release(p,fi2);
+		fs.release(p, fi2);
 
 		FuseFileInfo fi3 = TestFileInfo.create();
-		fs.create(p,0644, fi3);
-		Assertions.assertEquals(0, fs.getattr(p,stat));
+		fs.create(p, 0644, fi3);
+		Assertions.assertEquals(0, fs.getattr(p, stat));
 	}
 
 	private Pointer mockPointer(ByteBuffer buf) {

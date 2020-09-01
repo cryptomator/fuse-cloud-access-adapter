@@ -5,7 +5,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>org.cryptomator</groupId>
 	<artifactId>fuse-cloud-access-adapter</artifactId>
-	<version>0.1.0-SNAPSHOT</version>
+	<version>0.3.0-SNAPSHOT</version>
 
 	<name>FUSE to CloudAccess Adapter</name>
 	<description>Adapter between a FUSE frontend and a CloudAccess backend.</description>
@@ -59,7 +59,7 @@
 
 		<!-- compile time dependencies -->
 		<jnrfuse.version>0.5.4</jnrfuse.version>
-		<cloudaccess.version>0.2.0-beta8</cloudaccess.version>
+		<cloudaccess.version>0.2.0</cloudaccess.version>
 		<slf4j.version>1.7.28</slf4j.version>
 
 		<!-- test dependencies -->

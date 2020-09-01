@@ -37,12 +37,7 @@ class OpenFileFactory {
 	private final OpenFileUploader uploader;
 	private final Path cacheDir;
 
-	public OpenFileFactory(CloudProvider provider, Path cacheDir) {
-		this(provider, new OpenFileUploader(provider), cacheDir);
-	}
-
-	// visible for testing
-	OpenFileFactory(CloudProvider provider, OpenFileUploader uploader, Path cacheDir) {
+	public OpenFileFactory(CloudProvider provider, OpenFileUploader uploader, Path cacheDir) {
 		this.provider = provider;
 		this.uploader = uploader;
 		this.cacheDir = cacheDir;
@@ -55,16 +50,20 @@ class OpenFileFactory {
 	 */
 	public OpenFileHandle open(CloudPath path, Set<OpenFlags> flags, long initialSize, Instant lastModified) throws IOException {
 		try {
-			var openFile = activeFiles.computeIfAbsent(path, p -> {
-				var cachedFile = cachedFiles.getIfPresent(p);
-				if (cachedFile != null) {
-					cachedFiles.invalidate(p);
-					return cachedFile;
-				} else {
-					return this.createOpenFile(p, initialSize, lastModified);
-				}
-			});
-			openFile.opened();
+			OpenFile openFile;
+			synchronized (this) {
+				openFile = activeFiles.computeIfAbsent(path, p -> {
+					var cachedFile = cachedFiles.getIfPresent(p);
+					if (cachedFile != null) {
+						cachedFiles.invalidate(p);
+						cachedFile.updateLastModified(lastModified);
+						return cachedFile;
+					} else {
+						return this.createOpenFile(p, initialSize, lastModified);
+					}
+				});
+				openFile.opened();
+			}
 			if (flags.contains(OpenFlags.O_TRUNC)) {
 				openFile.truncate(0);
 			}
@@ -147,8 +146,8 @@ class OpenFileFactory {
 			return;
 		}
 		var file = handle.getFile();
-		if (file.released() == 0 && activeFiles.containsKey(file.getPath())) {
-			synchronized (this) { //TODO: is this still needed? Due to the Path locks, there is only one altering thread at a time.
+		synchronized (this) {
+			if (file.released() == 0 && activeFiles.containsKey(file.getPath())) {
 				// transition from active to cached state
 				var path = handle.getFile().getPath();
 				activeFiles.remove(path);
