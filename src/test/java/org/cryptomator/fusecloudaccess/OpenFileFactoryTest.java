@@ -1,77 +1,85 @@
 package org.cryptomator.fusecloudaccess;
 
 import jnr.constants.platform.OpenFlags;
+import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 
+import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 
 public class OpenFileFactoryTest {
 
-	private static final Path PATH = Path.of("this/is/a/path");
+	private static final CloudPath PATH = CloudPath.of("this/is/a/path");
 	private static final Set<OpenFlags> OPEN_FLAGS = Set.of(OpenFlags.O_RDONLY);
 
 	private CloudProvider provider = Mockito.mock(CloudProvider.class);
-	private OpenFileFactory openFiles;
+	private OpenFileUploader uploader = Mockito.mock(OpenFileUploader.class);
+	private OpenFileFactory openFileFactory;
 
 	@BeforeEach
-	public void setup() {
-		openFiles = new OpenFileFactory(provider);
+	public void setup(@TempDir Path tmpDir) {
+		openFileFactory = new OpenFileFactory(provider, uploader, tmpDir);
 	}
 
 	@Test
-	public void testAfterOpenTheOpenFileIsPresent() {
-		long handle = openFiles.open(PATH, OPEN_FLAGS);
+	@DisplayName("can get(...) file handle after opening a file")
+	public void testAfterOpenTheOpenFileIsPresent() throws IOException {
+		var handle = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 
-		var actualFile = openFiles.get(handle);
-
-		Assertions.assertTrue(actualFile.isPresent());
+		var sameHandle = openFileFactory.get(handle.getId());
+		Assertions.assertSame(handle, sameHandle.get());
 	}
 
 	@Test
-	public void testAfterCloseTheOpenFileIsNotPresent() {
-		long handle = openFiles.open(PATH, OPEN_FLAGS);
-		assert openFiles.get(handle).isPresent();
+	@DisplayName("closing removes file handle")
+	public void testClosingReleasesHandle() throws IOException {
+		var handle = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
+		Assumptions.assumeTrue(openFileFactory.get(handle.getId()).isPresent());
 
-		openFiles.close(handle);
-		var actualFile = openFiles.get(handle);
+		openFileFactory.close(handle.getId());
 
-		Assertions.assertTrue(actualFile.isEmpty());
+		Assertions.assertFalse(openFileFactory.get(handle.getId()).isPresent());
 	}
 
 	@Test
-	public void testSameParameterGetTwoHandlesAndOpenFiles() {
-		//TODO: concurrent
-		long handle1 = openFiles.open(PATH, OPEN_FLAGS);
-		long handle2 = openFiles.open(PATH, OPEN_FLAGS);
-
+	@DisplayName("closing last file handle triggers upload")
+	public void testClosingLastHandleTriggersUpload() throws IOException {
+		var handle1 = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
+		var handle2 = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 		Assertions.assertNotEquals(handle1, handle2);
 
-		var actualFile1 = openFiles.get(handle1);
-		var actualFile2 = openFiles.get(handle2);
+		openFileFactory.close(handle1.getId());
+		Mockito.verify(uploader, Mockito.never()).scheduleUpload(Mockito.any());
 
-		Assertions.assertTrue(actualFile1.isPresent());
-		Assertions.assertTrue(actualFile2.isPresent());
-		Assertions.assertNotEquals(actualFile1.get(), actualFile2.get());
+		openFileFactory.close(handle2.getId());
+		Mockito.verify(uploader).scheduleUpload(handle2.getFile());
 	}
 
 	@Test
-	public void testClosingOneHandleClosesCorrectOpenFile() {
-		//TODO: Concurrent test!
-		long handleClose = openFiles.open(PATH, OPEN_FLAGS);
-		long handleOpen = openFiles.open(PATH, OPEN_FLAGS);
-		assert openFiles.get(handleClose).isPresent() && openFiles.get(handleOpen).isPresent();
+	@DisplayName("closing invalid handle is no-op")
+	public void testClosingNonExisting() {
+		Assumptions.assumeFalse(openFileFactory.get(1337l).isPresent());
 
-		openFiles.close(handleClose);
-		var actualFileClosed = openFiles.get(handleClose);
-		var actualFileOpen = openFiles.get(handleOpen);
+		openFileFactory.close(1337l);
+	}
 
-		Assertions.assertTrue(actualFileClosed.isEmpty());
-		Assertions.assertTrue(actualFileOpen.isPresent());
+	@Test
+	@DisplayName("opening the same file twice leads to distinct file handles")
+	public void testFileHandlesAreDistinct() throws IOException {
+		var handle1 = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
+		var handle2 = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
+
+		Assertions.assertNotEquals(handle1, handle2);
 	}
 
 }

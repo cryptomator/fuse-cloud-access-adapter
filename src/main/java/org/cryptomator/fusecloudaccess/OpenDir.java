@@ -4,12 +4,11 @@ import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
+import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import ru.serce.jnrfuse.FuseFillDir;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -18,12 +17,12 @@ import java.util.concurrent.CompletionStage;
 class OpenDir {
 
 	private final CloudProvider provider;
-	private final Path path;
+	private final CloudPath path;
 	private Optional<String> pageToken;
 	private List<String> children;
 	private boolean reachedEof;
 
-	public OpenDir(CloudProvider provider, Path path) {
+	public OpenDir(CloudProvider provider, CloudPath path) {
 		this.provider = provider;
 		this.path = path;
 		this.pageToken = Optional.empty();
@@ -43,20 +42,22 @@ class OpenDir {
 
 	// https://www.cs.hmc.edu/~geoff/classes/hmc.cs135.201001/homework/fuse/fuse_doc.html#readdir-details
 	public CompletionStage<Integer> list(Pointer buf, FuseFillDir filler, int offset) {
-		if (offset < children.size()) {
-			var childName = children.get(offset);
-			int nextOffset = offset + 1;
-			int result = filler.apply(buf, childName, null, nextOffset);
-			if (result != 0) {
+		// fill with loaded children:
+		int i = offset;
+		for (; i < children.size(); i++) {
+			var childName = children.get(i);
+			int result = filler.apply(buf, childName, null, i + 1);
+			if (result != 0) { // buffer is full
 				return CompletableFuture.completedFuture(0);
-			} else {
-				return list(buf, filler, nextOffset);
 			}
-		} else if (reachedEof) {
+		}
+
+		// load next children (unless reached EOF) and continue listing at current position:
+		if (reachedEof) {
 			return CompletableFuture.completedFuture(0);
 		} else {
-			assert offset >= children.size();
-			return loadNext().thenCompose(v -> list(buf, filler, offset));
+			final int j = i;
+			return loadNext().thenCompose(v -> list(buf, filler, j));
 		}
 	}
 

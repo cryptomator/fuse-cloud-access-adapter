@@ -4,6 +4,7 @@ import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudItemList;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudItemType;
+import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,15 +13,16 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import ru.serce.jnrfuse.FuseFillDir;
 
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 public class OpenDirTest {
 
-	private final Path path = Path.of("/path/to/dir");
+	private final CloudPath path = CloudPath.of("/path/to/dir");
 	private final CloudItemMetadata m1 = new CloudItemMetadata("m1", path.resolve("m1"), CloudItemType.FILE);
 	private final CloudItemMetadata m2 = new CloudItemMetadata("m2", path.resolve("m2"), CloudItemType.FILE);
 	private final CloudItemMetadata m3 = new CloudItemMetadata("m3", path.resolve("m3"), CloudItemType.FILE);
@@ -42,7 +44,6 @@ public class OpenDirTest {
 	@Test
 	@DisplayName("list until EOF")
 	public void testListUntilEOF() {
-		var dir = new OpenDir(provider, path);
 		var part1 = new CloudItemList(List.of(m1, m2, m3), Optional.of("token1"));
 		var part2 = new CloudItemList(List.of(m4), Optional.of("token2"));
 		var part3 = new CloudItemList(List.of(m5), Optional.empty());
@@ -65,9 +66,22 @@ public class OpenDirTest {
 	}
 
 	@Test
+	@DisplayName("list large dir (20k entries)")
+	public void testListLargeDir() {
+		var children = IntStream.range(0, 20_000).mapToObj(i -> m1).collect(Collectors.toList());
+		var part1 = new CloudItemList(children, Optional.empty());
+		Mockito.when(provider.list(path, Optional.empty())).thenReturn(CompletableFuture.completedFuture(part1));
+
+		var futureResult = dir.list(buf, filler, 0);
+		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+
+		Assertions.assertEquals(0, result);
+		Mockito.verify(filler, Mockito.times(20_000 + 2)).apply(Mockito.eq(buf), Mockito.anyString(), Mockito.any(), Mockito.anyLong());
+	}
+
+	@Test
 	@DisplayName("list until EOM")
 	public void testListUntilEOM() {
-		var dir = new OpenDir(provider, path);
 		Mockito.when(filler.apply(buf, ".", null, 1)).thenReturn(1);
 
 		var futureResult = dir.list(buf, filler, 0);

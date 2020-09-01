@@ -34,8 +34,9 @@ public class MirrorTest {
 				System.out.println("Enter path to the directory you want to mirror:");
 				Path p = Path.of(scanner.nextLine());
 				Path m = Path.of("/Volumes/" + UUID.randomUUID().toString());
+				Path c = Files.createTempDirectory("cache");
 				var cloudAccessProvider = new LocalFsCloudProvider(p);
-				var fs = new CloudAccessFS(cloudAccessProvider, 1000);
+				var fs = new CloudAccessFS(cloudAccessProvider, c, 1000);
 				var flags = new String[] {
 						"-ouid=" + Files.getAttribute(USER_HOME, "unix:uid"),
 						"-ogid=" + Files.getAttribute(USER_HOME, "unix:gid"),
@@ -43,7 +44,6 @@ public class MirrorTest {
 						"-oauto_xattr",
 						"-oauto_cache",
 						"-ovolname=CloudAccessMirror",
-						"-ordonly", // TODO remove once we support writing
 						"-omodules=iconv,from_code=UTF-8,to_code=UTF-8-MAC", // show files names in Unicode NFD encoding
 						"-onoappledouble", // vastly impacts performance for some reason...
 						"-odefault_permissions" // let the kernel assume permissions based on file attributes etc
@@ -68,15 +68,15 @@ public class MirrorTest {
 				Path p = Paths.get(scanner.nextLine());
 				System.out.println("Enter path to the not-existent directory you want to use as mountpoint :");
 				Path m = Paths.get(scanner.nextLine());
+				Path c = Files.createTempDirectory("cache");
 				var cloudAccessProvider = new LocalFsCloudProvider(p);
-				var fs = new CloudAccessFS(cloudAccessProvider, 1000);
+				var fs = new CloudAccessFS(cloudAccessProvider, c, 1000);
 				var flags = new String[] {
 						"-ouid=-1",
 						"-ogid=-1",
 						"-oauto_unmount",
 						"-oauto_cache",
 						"-ovolname=CloudAccessMirror",
-						"-ordonly", // TODO remove once we support writing
 						"-odefault_permissions" // let the kernel assume permissions based on file attributes etc
 				};
 				//mount
@@ -88,6 +88,8 @@ public class MirrorTest {
 				//unmount
 				fs.umount(); //we are not blocking, therefore need to explicitly call umount
 				LOG.info("Unmounted {}.", m);
+			} catch (IOException e) {
+				LOG.error("mount failed", e);
 			}
 		}
 	}
