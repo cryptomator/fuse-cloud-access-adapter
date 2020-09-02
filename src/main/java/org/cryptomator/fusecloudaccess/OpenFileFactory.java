@@ -32,7 +32,7 @@ class OpenFileFactory {
 	// Attention: Thread safety is important when modifying any of the following two collections:
 	private final ConcurrentMap<CloudPath, OpenFile> activeFiles = new ConcurrentHashMap<>();
 	private final Cache<CloudPath, OpenFile> cachedFiles = CacheBuilder.newBuilder().expireAfterWrite(10, TimeUnit.SECONDS).removalListener(this::removedFromCache).build();
-	private final Map<Long, OpenFileHandle> fileHandles = new HashMap<>();
+	private final Map<Long, OpenFile> fileHandles = new HashMap<>();
 	private final CloudProvider provider;
 	private final OpenFileUploader uploader;
 	private final Path cacheDir;
@@ -48,7 +48,7 @@ class OpenFileFactory {
 	 * @param flags file open options
 	 * @return file handle used to identify and close open files.
 	 */
-	public OpenFileHandle open(CloudPath path, Set<OpenFlags> flags, long initialSize, Instant lastModified) throws IOException {
+	public long open(CloudPath path, Set<OpenFlags> flags, long initialSize, Instant lastModified) throws IOException {
 		try {
 			OpenFile openFile;
 			synchronized (this) {
@@ -68,9 +68,8 @@ class OpenFileFactory {
 				openFile.truncate(0);
 			}
 			var handleId = FILE_HANDLE_GEN.incrementAndGet();
-			var fileHandle = new OpenFileHandle(openFile, handleId);
-			fileHandles.put(handleId, fileHandle);
-			return fileHandle;
+			fileHandles.put(handleId, openFile);
+			return handleId;
 		} catch (UncheckedIOException e) {
 			throw new IOException(e);
 		}
@@ -85,7 +84,7 @@ class OpenFileFactory {
 		}
 	}
 
-	public Optional<OpenFileHandle> get(long fileHandle) {
+	public Optional<OpenFile> get(long fileHandle) {
 		return Optional.ofNullable(fileHandles.get(fileHandle));
 	}
 
@@ -139,16 +138,15 @@ class OpenFileFactory {
 	 * @param handleId file handle
 	 */
 	public void close(long handleId) {
-		OpenFileHandle handle = fileHandles.remove(handleId);
-		if (handle == null) {
+		OpenFile file = fileHandles.remove(handleId);
+		if (file == null) {
 			LOG.warn("No such file handle: {}", handleId);
 			return;
 		}
-		var file = handle.getFile();
 		synchronized (this) {
-			if (file.released() == 0 && activeFiles.containsKey(file.getPath())) {
+			var path = file.getPath();
+			if (file.released() == 0 && activeFiles.containsKey(path)) {
 				// transition from active to cached state
-				var path = handle.getFile().getPath();
 				activeFiles.remove(path);
 				cachedFiles.put(path, file);
 				uploader.scheduleUpload(file);

@@ -363,11 +363,9 @@ public class CloudAccessFSTest {
 		@DisplayName("open() returns 0 in success and writes the handle to field FileInfo.fh")
 		@Test
 		public void testSuccessfulOpenReturnsZeroAndStoresHandle() throws IOException {
-			OpenFileHandle handle = Mockito.mock(OpenFileHandle.class);
 			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
 			Mockito.when(itemMetadata.getItemType()).thenReturn(CloudItemType.FILE);
-			Mockito.when(handle.getId()).thenReturn(42l);
-			Mockito.when(fileFactory.open(Mockito.any(), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(handle);
+			Mockito.when(fileFactory.open(Mockito.any(), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(42l);
 			Mockito.when(provider.itemMetadata(PATH)).thenReturn(CompletableFuture.completedFuture(itemMetadata));
 
 			var result = cloudFs.open(PATH.toString(), fi);
@@ -428,13 +426,13 @@ public class CloudAccessFSTest {
 	class ReadTest {
 
 		private TestFileInfo fi;
-		private OpenFileHandle fileHandle;
+		private OpenFile openFile;
 		private Pointer buf;
 
 		@BeforeEach
 		public void setup() {
 			fi = TestFileInfo.create();
-			fileHandle = Mockito.mock(OpenFileHandle.class);
+			openFile = Mockito.mock(OpenFile.class);
 			buf = Mockito.mock(Pointer.class);
 		}
 
@@ -450,8 +448,8 @@ public class CloudAccessFSTest {
 		@DisplayName("read() returns 0 on success")
 		@Test
 		public void testSuccessfulReadReturnsZero() {
-			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(fileHandle));
-			Mockito.when(fileHandle.read(buf, 1l, 2l)).thenReturn(CompletableFuture.completedFuture(0));
+			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(openFile));
+			Mockito.when(openFile.read(buf, 1l, 2l)).thenReturn(CompletableFuture.completedFuture(0));
 
 			var result = cloudFs.read(PATH.toString(), buf, 2l, 1l, fi);
 
@@ -461,8 +459,8 @@ public class CloudAccessFSTest {
 		@DisplayName("read() returns ENOENT if resource is not found")
 		@Test
 		public void testNotFoundExceptionReturnsENOENT() {
-			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(fileHandle));
-			Mockito.when(fileHandle.read(buf, 1l, 2l)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
+			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(openFile));
+			Mockito.when(openFile.read(buf, 1l, 2l)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
 
 			var result = cloudFs.read(PATH.toString(), buf, 2l, 1l, fi);
 
@@ -473,8 +471,8 @@ public class CloudAccessFSTest {
 		@ValueSource(classes = {CloudProviderException.class, RuntimeException.class})
 		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
-			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(fileHandle));
-			Mockito.when(fileHandle.read(buf, 1l, 2l)).thenReturn(CompletableFuture.failedFuture(e));
+			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(openFile));
+			Mockito.when(openFile.read(buf, 1l, 2l)).thenReturn(CompletableFuture.failedFuture(e));
 
 			var result = cloudFs.read(PATH.toString(), buf, 2l, 1l, fi);
 
@@ -497,13 +495,13 @@ public class CloudAccessFSTest {
 	class WriteTest {
 
 		private TestFileInfo fi;
-		private OpenFileHandle fileHandle;
+		private OpenFile openFile;
 		private Pointer buf;
 
 		@BeforeEach
 		public void setup() {
 			fi = TestFileInfo.create();
-			fileHandle = Mockito.mock(OpenFileHandle.class);
+			openFile = Mockito.mock(OpenFile.class);
 			buf = Mockito.mock(Pointer.class);
 		}
 
@@ -518,32 +516,21 @@ public class CloudAccessFSTest {
 
 		@DisplayName("write() returns 0 on success")
 		@Test
-		public void testSuccessfulReadReturnsZero() {
-			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(fileHandle));
-			Mockito.when(fileHandle.write(buf, 1l, 2l)).thenReturn(CompletableFuture.completedFuture(0));
+		public void testSuccessfulReadReturnsZero() throws IOException {
+			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(openFile));
+			Mockito.when(openFile.write(buf, 1l, 2l)).thenReturn(0);
 
 			var result = cloudFs.write(PATH.toString(), buf, 2l, 1l, fi);
 
 			Assertions.assertEquals(0, result);
 		}
 
-		@DisplayName("write() returns ENOENT if resource is not found")
-		@Test
-		public void testNotFoundExceptionReturnsENOENT() {
-			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(fileHandle));
-			Mockito.when(fileHandle.write(buf, 1l, 2l)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
-
-			var result = cloudFs.write(PATH.toString(), buf, 2l, 1l, fi);
-
-			Assertions.assertEquals(-ErrorCodes.ENOENT(), result);
-		}
-
 		@ParameterizedTest(name = "write() returns EIO on any other exception (expected or not)")
 		@ValueSource(classes = {CloudProviderException.class, RuntimeException.class})
-		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
+		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws ReflectiveOperationException, IOException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
-			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(fileHandle));
-			Mockito.when(fileHandle.write(buf, 1l, 2l)).thenReturn(CompletableFuture.failedFuture(e));
+			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(openFile));
+			Mockito.when(openFile.write(buf, 1l, 2l)).thenThrow(e);
 
 			var result = cloudFs.write(PATH.toString(), buf, 2l, 1l, fi);
 
@@ -714,18 +701,16 @@ public class CloudAccessFSTest {
 		@Test
 		public void testNotExistingCaseReturnsZeroAndOpensFile() throws IOException {
 			fi.fh.set(0);
-			OpenFileHandle handle = Mockito.mock(OpenFileHandle.class);
 			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
-			Mockito.when(handle.getId()).thenReturn(1337l);
 			Mockito.when(itemMetadata.getPath()).thenReturn(PATH);
-			Mockito.when(fileFactory.open(Mockito.any(), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(handle);
+			Mockito.when(fileFactory.open(Mockito.any(), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(1337l);
 			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(itemMetadata));
 
 			var actualResult = cloudFs.create(PATH.toString(), mode, fi);
 
 			Assertions.assertEquals(0, actualResult);
 			Mockito.verify(fileFactory).open(Mockito.eq(PATH), Mockito.any(), Mockito.eq(0l), Mockito.any());
-			Assertions.assertEquals(handle.getId(), fi.fh.longValue());
+			Assertions.assertEquals(1337l, fi.fh.longValue());
 		}
 
 		@DisplayName("create(...) in existing case returns 0 and opens file")
@@ -733,12 +718,10 @@ public class CloudAccessFSTest {
 		public void testExistingCaseReturnsZeroAndOpensFile() throws IOException {
 			fi.fh.set(0);
 			var e = new AlreadyExistsException(PATH.toString());
-			OpenFileHandle handle = Mockito.mock(OpenFileHandle.class);
 			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
-			Mockito.when(handle.getId()).thenReturn(1337l);
 			Mockito.when(itemMetadata.getPath()).thenReturn(PATH);
 			Mockito.when(itemMetadata.getSize()).thenReturn(Optional.of(42l));
-			Mockito.when(fileFactory.open(Mockito.any(), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(handle);
+			Mockito.when(fileFactory.open(Mockito.any(), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(1337l);
 			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
 			Mockito.when(provider.itemMetadata(Mockito.eq(PATH))).thenReturn(CompletableFuture.completedFuture(itemMetadata));
 
@@ -746,7 +729,7 @@ public class CloudAccessFSTest {
 
 			Assertions.assertEquals(0, actualResult);
 			Mockito.verify(fileFactory).open(Mockito.eq(PATH), Mockito.any(), Mockito.eq(42l), Mockito.any());
-			Assertions.assertEquals(handle.getId(), fi.fh.longValue());
+			Assertions.assertEquals(1337l, fi.fh.longValue());
 		}
 
 		@DisplayName("create(...) returns ENOENT on NotFoundException")

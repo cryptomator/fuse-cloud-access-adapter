@@ -2,11 +2,13 @@ package org.cryptomator.fusecloudaccess;
 
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
+import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.cryptomator.cloudaccess.api.exceptions.CloudProviderException;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -17,7 +19,9 @@ import org.mockito.Mockito;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.channels.WritableByteChannel;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -25,8 +29,10 @@ import java.nio.file.spi.FileSystemProvider;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
 
@@ -62,15 +68,138 @@ public class OpenFileTest {
 	}
 
 	@Test
+	@DisplayName("test perstistTo(...)")
 	public void testPersist(@TempDir Path tmpDir) throws IOException {
 		Path tmpFile = tmpDir.resolve("cache.file");
 		Path persistentFile = tmpDir.resolve("persistent.file");
+
 		try (var cachedFile = OpenFile.create(file, tmpFile, provider, 100, Instant.EPOCH)) {
 			cachedFile.persistTo(persistentFile);
 		}
+
 		Assertions.assertTrue(Files.notExists(tmpFile));
 		Assertions.assertTrue(Files.exists(persistentFile));
 		Assertions.assertEquals(100, Files.size(persistentFile));
+	}
+
+	@DisplayName("test I/O error during write(...)")
+	@Test
+	public void testWriteFailsWithException() throws IOException {
+		var e = new IOException("fail");
+		var buf = Mockito.mock(Pointer.class);
+		Mockito.when(fileChannel.write(Mockito.any(), Mockito.anyLong())).thenThrow(e);
+
+		var thrown = Assertions.assertThrows(IOException.class, () -> {
+			openFile.write(buf, 1000l, 42l);
+		});
+
+		Assertions.assertEquals(e, thrown);
+	}
+
+	@DisplayName("test write(...)")
+	@ParameterizedTest(name = "write(buf, 1000, {0})")
+	@ValueSource(ints = {0, 100, 1023, 1024, 1025, 10_000})
+	public void testWrite(int n) throws IOException {
+		var content = new byte[n];
+		var written = new byte[n];
+		var buf = Mockito.mock(Pointer.class);
+		new Random(42l).nextBytes(content);
+		Mockito.doAnswer(invocation -> {
+			long offset = invocation.getArgument(0);
+			byte[] dst = invocation.getArgument(1);
+			int idx = invocation.getArgument(2);
+			int len = invocation.getArgument(3);
+			System.arraycopy(content, (int) offset, dst, idx, len);
+			return null;
+		}).when(buf).get(Mockito.anyLong(), Mockito.any(byte[].class), Mockito.anyInt(), Mockito.anyInt());
+		Mockito.doAnswer(invocation -> {
+			ByteBuffer source = invocation.getArgument(0);
+			long pos = invocation.getArgument(1);
+			int count = source.capacity();
+			source.get(written, (int) pos - 1000, count);
+			return count;
+		}).when(fileChannel).write(Mockito.any(), Mockito.anyLong());
+		Assumptions.assumeFalse(openFile.isDirty());
+
+		var result = openFile.write(buf, 1000l, n);
+
+		Assertions.assertEquals(n, result);
+		Assertions.assertArrayEquals(content, written);
+		Assertions.assertTrue(openFile.isDirty());
+		// TODO: check if populated ranges have been updated
+	}
+
+	@DisplayName("test I/O error during read(...)")
+	@Test
+	public void testReadFailsWithException() throws IOException {
+		var e = new IOException("fail");
+		var buf = Mockito.mock(Pointer.class);
+		var in = new ByteArrayInputStream(new byte[42]);
+		Mockito.when(fileChannel.size()).thenReturn(1042l);
+		Mockito.when(provider.read(file, 1000l, 42l, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.completedFuture(in));
+		Mockito.when(fileChannel.transferTo(Mockito.anyLong(), Mockito.anyLong(), Mockito.any())).thenThrow(e);
+
+		var futureResult = openFile.read(buf, 1000l, 42l);
+		var thrown = Assertions.assertThrows(CompletionException.class, () -> {
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().join());
+		});
+
+		Assertions.assertTrue(futureResult.toCompletableFuture().isCompletedExceptionally());
+		Assertions.assertEquals(e, thrown.getCause());
+	}
+
+	@Test
+	@DisplayName("read to EOF")
+	public void testReadToEof() throws IOException {
+		var buf = Mockito.mock(Pointer.class);
+		var in = new ByteArrayInputStream(new byte[42]);
+		Mockito.when(fileChannel.size()).thenReturn(1042l);
+		Mockito.when(provider.read(file, 1000l, 42l, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.completedFuture(in));
+		Mockito.doAnswer(invocation -> {
+			WritableByteChannel target = invocation.getArgument(2);
+			target.write(ByteBuffer.allocate(50));
+			return 50l;
+		}).when(fileChannel).transferTo(Mockito.eq(1000l), Mockito.eq(100l), Mockito.any());
+
+		var futureResult = openFile.read(buf, 1000l, 100l);
+		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+
+		Assertions.assertEquals(50, result);
+		Mockito.verify(buf, Mockito.times(1)).put(Mockito.eq(0l), Mockito.any(byte[].class), Mockito.eq(0), Mockito.eq(50));
+	}
+
+	@DisplayName("test read(...)")
+	@ParameterizedTest(name = "read(buf, 1000, {0})")
+	@ValueSource(ints = {0, 100, 1023, 1024, 1025, 10_000})
+	public void testRead(int n) throws IOException {
+		var content = new byte[n];
+		var transferred = new byte[n];
+		var buf = Mockito.mock(Pointer.class);
+		var in = new ByteArrayInputStream(content);
+		new Random(42l).nextBytes(content);
+		Mockito.when(fileChannel.size()).thenReturn(1042l);
+		Mockito.when(provider.read(file, 1000l, 42l, ProgressListener.NO_PROGRESS_AWARE)).thenReturn(CompletableFuture.completedFuture(in));
+		Mockito.doAnswer(invocation -> {
+			long pos = invocation.getArgument(0);
+			long count = invocation.getArgument(1);
+			WritableByteChannel target = invocation.getArgument(2);
+			target.write(ByteBuffer.wrap(content, (int) pos - 1000, (int) count));
+			return count;
+		}).when(fileChannel).transferTo(Mockito.anyLong(), Mockito.anyLong(), Mockito.any());
+		Mockito.doAnswer(invocation -> {
+			long offset = invocation.getArgument(0);
+			byte[] src = invocation.getArgument(1);
+			int idx = invocation.getArgument(2);
+			int len = invocation.getArgument(3);
+			System.arraycopy(src, idx, transferred, (int) offset, len);
+			return null;
+		}).when(buf).put(Mockito.anyLong(), Mockito.any(byte[].class), Mockito.anyInt(), Mockito.anyInt());
+
+		var futureResult = openFile.read(buf, 1000l, n);
+		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+
+		Assertions.assertEquals(n, result);
+		Assertions.assertArrayEquals(content, transferred);
 	}
 
 	@Test
@@ -90,9 +219,8 @@ public class OpenFileTest {
 		Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(50l), Mockito.eq(10l))).thenReturn(10l);
 
 		var futureResult = openFile.load(50, 10);
-		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+		Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
-		Assertions.assertEquals(result, fileChannel);
 		Mockito.verify(fileChannel).transferFrom(Mockito.any(), Mockito.eq(50l), Mockito.eq(10l));
 		Mockito.verify(populatedRanges).add(Range.closedOpen(50l, 60l));
 	}
@@ -107,9 +235,8 @@ public class OpenFileTest {
 		Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(50l), Mockito.eq(10l))).thenReturn(9l);
 
 		var futureResult = openFile.load(50, 10);
-		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+		Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
-		Assertions.assertEquals(result, fileChannel);
 		Mockito.verify(fileChannel).transferFrom(Mockito.any(), Mockito.eq(50l), Mockito.eq(10l));
 		Mockito.verify(populatedRanges).add(Range.closedOpen(50l, 59l));
 	}
@@ -150,9 +277,8 @@ public class OpenFileTest {
 	@DisplayName("load region [50, 50] (empty range)")
 	public void testLoadEmptyRange() {
 		var futureResult = openFile.load(50, 0);
-		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+		Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
-		Assertions.assertEquals(result, fileChannel);
 		Mockito.verify(provider, Mockito.never()).read(Mockito.any(), Mockito.anyLong(), Mockito.anyLong(), Mockito.any());
 	}
 
@@ -162,9 +288,8 @@ public class OpenFileTest {
 		Mockito.when(populatedRanges.encloses(Range.closedOpen(50l, 60l))).thenReturn(true);
 
 		var futureResult = openFile.load(50, 10);
-		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+		Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
-		Assertions.assertEquals(result, fileChannel);
 		Mockito.verify(provider, Mockito.never()).read(Mockito.any(), Mockito.anyLong(), Mockito.anyLong(), Mockito.any());
 	}
 
@@ -179,9 +304,8 @@ public class OpenFileTest {
 		Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(60l), Mockito.eq(10l))).thenReturn(10l);
 
 		var futureResult = openFile.load(50, 20);
-		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+		Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
-		Assertions.assertEquals(result, fileChannel);
 		Mockito.verify(fileChannel).transferFrom(Mockito.any(), Mockito.eq(60l), Mockito.eq(10l));
 		Mockito.verify(populatedRanges).add(Range.closedOpen(60l, 70l));
 	}

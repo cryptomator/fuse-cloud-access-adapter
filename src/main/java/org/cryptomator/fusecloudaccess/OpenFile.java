@@ -5,6 +5,7 @@ import com.google.common.collect.ImmutableRangeSet;
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
 import com.google.common.collect.TreeRangeSet;
+import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudItemType;
 import org.cryptomator.cloudaccess.api.CloudPath;
@@ -13,6 +14,7 @@ import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
@@ -36,6 +38,8 @@ import static java.nio.file.StandardOpenOption.*;
 class OpenFile implements Closeable {
 
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFile.class);
+	private static final int BUFFER_SIZE = 1024; // 1 kiB
+	private static final int READAHEAD_SIZE = 1024 * 1024; // 1 MiB
 
 	private final FileChannel fc;
 	private final CloudProvider provider;
@@ -118,14 +122,68 @@ class OpenFile implements Closeable {
 	}
 
 	/**
+	 * Reads up to {@code size} bytes beginning at {@code offset} into {@code buf}.
+	 *
+	 * @param buf    Buffer
+	 * @param offset Position of first byte to read
+	 * @param size   Number of bytes to read
+	 * @return A CompletionStage either containing the actual number of bytes read (can be less than {@code size} if reached EOF)
+	 * or failing with an {@link IOException}
+	 */
+	public CompletionStage<Integer> read(Pointer buf, long offset, long size) {
+		Preconditions.checkState(fc.isOpen());
+		return load(offset, size).thenCompose(ignored -> {
+			try {
+				long pos = offset;
+				while (pos < offset + size) {
+					int n = (int) Math.min(BUFFER_SIZE, size - (pos - offset)); // int-cast: n <= BUFFER_SIZE
+					var out = new ByteArrayOutputStream();
+					long transferred = fc.transferTo(pos, n, Channels.newChannel(out));
+					assert transferred == out.size();
+					buf.put(pos - offset, out.toByteArray(), 0, out.size());
+					pos += transferred;
+					if (transferred < n) {
+						break; // EOF
+					}
+				}
+				int totalRead = (int) (pos - offset); // TODO: can we return long?
+				return CompletableFuture.completedFuture(totalRead);
+			} catch (IOException e) {
+				return CompletableFuture.failedFuture(e);
+			}
+		});
+	}
+
+	/**
+	 * Writes up to {@code size} bytes beginning at {@code offset} from {@code buf} to this file.
+	 *
+	 * @param buf    Buffer
+	 * @param offset Position of first byte to write
+	 * @param size   Number of bytes to write
+	 * @return A CompletionStage either containing the actual number of bytes written or failing with an {@link IOException}
+	 */
+	public int write(Pointer buf, long offset, long size) throws IOException {
+		Preconditions.checkState(fc.isOpen());
+		assert size < Integer.MAX_VALUE; // technically an unsigned integer in the c header file
+		setDirty(true);
+		long pos = offset;
+		while (pos < offset + size) {
+			int n = (int) Math.min(BUFFER_SIZE, size - (pos - offset)); // int-cast: n <= BUFFER_SIZE
+			byte[] tmp = new byte[n];
+			buf.get(pos - offset, tmp, 0, n);
+			pos += fc.write(ByteBuffer.wrap(tmp), pos);
+		}
+		return (int) (pos - offset); // int-cast: result <= size
+	}
+
+	/**
 	 * Loads content into the cache file (if necessary) and provides access to the file channel that will then contain
 	 * the requested content, so it can be consumed via {@link FileChannel#transferTo(long, long, WritableByteChannel)}.
 	 *
 	 * @param offset First byte to read (inclusive), which must not exceed the file's size
 	 * @param count  Number of bytes to load
-	 * @return A CompletionStage that completes as soon as the requested range is available or fails either due to I/O errors or if requesting a range beyond EOF
 	 */
-	public CompletionStage<FileChannel> load(long offset, long count) {
+	CompletionStage<Void> load(long offset, long count) {
 		Preconditions.checkArgument(offset >= 0);
 		Preconditions.checkArgument(count >= 0);
 		Preconditions.checkState(fc.isOpen());
@@ -138,10 +196,10 @@ class OpenFile implements Closeable {
 			var range = Range.closedOpen(offset, upper);
 			synchronized (populatedRanges) {
 				if (range.isEmpty() || populatedRanges.encloses(range)) {
-					return CompletableFuture.completedFuture(fc);
+					return CompletableFuture.completedFuture(null);
 				} else {
 					var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges);
-					return CompletableFuture.allOf(missingRanges.asRanges().stream().map(this::loadMissing).toArray(CompletableFuture[]::new)).thenApply(ignored -> fc);
+					return CompletableFuture.allOf(missingRanges.asRanges().stream().map(this::loadMissing).toArray(CompletableFuture[]::new));
 				}
 			}
 		} catch (IOException e) {

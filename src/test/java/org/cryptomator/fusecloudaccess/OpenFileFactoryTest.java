@@ -36,19 +36,19 @@ public class OpenFileFactoryTest {
 	public void testAfterOpenTheOpenFileIsPresent() throws IOException {
 		var handle = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 
-		var sameHandle = openFileFactory.get(handle.getId());
-		Assertions.assertSame(handle, sameHandle.get());
+		var sameHandle = openFileFactory.get(handle);
+		Assertions.assertTrue(sameHandle.isPresent());
 	}
 
 	@Test
 	@DisplayName("closing removes file handle")
 	public void testClosingReleasesHandle() throws IOException {
 		var handle = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
-		Assumptions.assumeTrue(openFileFactory.get(handle.getId()).isPresent());
+		Assumptions.assumeTrue(openFileFactory.get(handle).isPresent());
 
-		openFileFactory.close(handle.getId());
+		openFileFactory.close(handle);
 
-		Assertions.assertFalse(openFileFactory.get(handle.getId()).isPresent());
+		Assertions.assertFalse(openFileFactory.get(handle).isPresent());
 	}
 
 	@Test
@@ -56,13 +56,16 @@ public class OpenFileFactoryTest {
 	public void testClosingLastHandleTriggersUpload() throws IOException {
 		var handle1 = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 		var handle2 = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
+		var file1 = openFileFactory.get(handle1).get();
+		var file2 = openFileFactory.get(handle1).get();
 		Assertions.assertNotEquals(handle1, handle2);
+		Assertions.assertSame(file1, file2);
 
-		openFileFactory.close(handle1.getId());
+		openFileFactory.close(handle1);
 		Mockito.verify(uploader, Mockito.never()).scheduleUpload(Mockito.any());
 
-		openFileFactory.close(handle2.getId());
-		Mockito.verify(uploader).scheduleUpload(handle2.getFile());
+		openFileFactory.close(handle2);
+		Mockito.verify(uploader).scheduleUpload(file1);
 	}
 
 	@Test

@@ -249,7 +249,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 							var size = metadata.getSize().orElse(0l);
 							var lastModified = metadata.getLastModifiedDate().orElse(Instant.EPOCH);
 							var handle = openFileFactory.open(path, BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, lastModified);
-							fi.fh.set(handle.getId());
+							fi.fh.set(handle);
 							return 0;
 						} catch (IOException e) {
 							return -ErrorCodes.EIO();
@@ -375,7 +375,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 						var size = metadata.getSize().orElse(0l);
 						var lastModified = metadata.getLastModifiedDate().orElse(Instant.EPOCH);
 						var handle = openFileFactory.open(path, BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, lastModified);
-						fi.fh.set(handle.getId());
+						fi.fh.set(handle);
 						return 0;
 					} catch (IOException e) {
 						return -ErrorCodes.EIO();
@@ -477,28 +477,20 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	public int write(String path, Pointer buf, long size, long offset, FuseFileInfo fi) {
 		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
-			var returnCode = writeInternal(fi.fh.get(), buf, size, offset);
 			LOG.trace("write {} (handle: {}, size: {}, offset: {})", path, fi.fh.get(), size, offset);
-			return returnOrTimeout(returnCode);
+			return writeInternal(fi.fh.get(), buf, size, offset);
 		} catch (Exception e) {
 			LOG.error("write() failed", e);
 			return -ErrorCodes.EIO();
 		}
 	}
 
-	private CompletionStage<Integer> writeInternal(long fileHandle, Pointer buf, long size, long offset) {
+	private int writeInternal(long fileHandle, Pointer buf, long size, long offset) throws IOException {
 		var openFile = openFileFactory.get(fileHandle);
 		if (openFile.isEmpty()) {
-			return CompletableFuture.completedFuture(-ErrorCodes.EBADF());
+			return -ErrorCodes.EBADF();
 		}
-		return openFile.get().write(buf, offset, size).exceptionally(e -> {
-			if (e instanceof NotFoundException) {
-				return -ErrorCodes.ENOENT();
-			} else {
-				LOG.error("write() failed", e);
-				return -ErrorCodes.EIO();
-			}
-		});
+		return openFile.get().write(buf, offset, size);
 	}
 
 	@Override
@@ -534,24 +526,21 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	public int ftruncate(String path, long size, FuseFileInfo fi) {
 		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
-			var returnCode = ftruncateInternal(fi.fh.get(), size);
 			LOG.trace("ftruncate {} (handle: {}, size: {}", path, fi.fh.get(), size);
-			return returnOrTimeout(returnCode);
+			return ftruncateInternal(fi.fh.get(), size);
 		} catch (Exception e) {
 			LOG.error("ftruncate() failed", e);
 			return -ErrorCodes.EIO();
 		}
 	}
 
-	private CompletionStage<Integer> ftruncateInternal(long fileHandle, long size) {
+	private int ftruncateInternal(long fileHandle, long size) throws IOException {
 		var handle = openFileFactory.get(fileHandle);
 		if (handle.isEmpty()) {
-			return CompletableFuture.completedFuture(-ErrorCodes.EBADF());
+			return -ErrorCodes.EBADF();
 		}
-		return handle.get().truncate(size).thenApply(ignored -> 0).exceptionally(e -> {
-			LOG.error("ftruncate() failed", e);
-			return -ErrorCodes.EIO();
-		});
+		handle.get().truncate(size);
+		return 0;
 	}
 
 	@Override
