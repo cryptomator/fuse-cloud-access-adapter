@@ -126,7 +126,7 @@ public class OpenFileTest {
 		Assertions.assertEquals(n, result);
 		Assertions.assertArrayEquals(content, written);
 		Assertions.assertTrue(openFile.isDirty());
-		// TODO: check if populated ranges have been updated
+		Mockito.verify(populatedRanges).add(Range.closedOpen(1000l, 1000l + n));
 	}
 
 	@DisplayName("test I/O error during read(...)")

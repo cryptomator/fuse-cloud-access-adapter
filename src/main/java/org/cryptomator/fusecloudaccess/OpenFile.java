@@ -173,7 +173,11 @@ class OpenFile implements Closeable {
 			buf.get(pos - offset, tmp, 0, n);
 			pos += fc.write(ByteBuffer.wrap(tmp), pos);
 		}
-		return (int) (pos - offset); // int-cast: result <= size
+		int written = (int) (pos - offset); // int-cast: result <= size
+		synchronized (populatedRanges) {
+			populatedRanges.add(Range.closedOpen(offset, offset + written));
+		}
+		return written;
 	}
 
 	/**
