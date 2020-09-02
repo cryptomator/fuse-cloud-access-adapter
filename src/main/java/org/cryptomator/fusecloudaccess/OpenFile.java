@@ -18,6 +18,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
@@ -26,9 +27,7 @@ import java.nio.channels.WritableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.HashSet;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -193,16 +192,20 @@ class OpenFile implements Closeable {
 		Preconditions.checkState(fc.isOpen());
 		try {
 			var size = fc.size();
-			if (offset > size) {
+			if (offset >= size) {
 				throw new EOFException("Requested range beyond EOF");
 			}
-			var upper = Math.min(size, offset + count);
-			var range = Range.closedOpen(offset, upper);
+			var requiredLastByte = Math.min(size, offset + count); // reads not behind eof (lastByte is exclusive!)
+			var requiredRange = Range.closedOpen(offset, requiredLastByte);
 			synchronized (populatedRanges) {
-				if (range.isEmpty() || populatedRanges.encloses(range)) {
+				if (requiredRange.isEmpty() || populatedRanges.encloses(requiredRange)) {
 					return CompletableFuture.completedFuture(null);
 				} else {
-					var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges);
+					var desiredCount = Math.max(count, READAHEAD_SIZE); // reads at least the readahead
+					var desiredLastByte = Math.min(size, offset + desiredCount); // reads not behind eof (lastByte is exclusive!)
+					var desiredRange = Range.closedOpen(offset, desiredLastByte);
+
+					var missingRanges = ImmutableRangeSet.of(desiredRange).difference(populatedRanges);
 					return CompletableFuture.allOf(missingRanges.asRanges().stream().map(this::loadMissing).toArray(CompletableFuture[]::new));
 				}
 			}
@@ -211,22 +214,45 @@ class OpenFile implements Closeable {
 		}
 	}
 
-	private CompletionStage<Void> loadMissing(Range<Long> range) {
-		assert !populatedRanges.intersects(range); // synchronized by caller
-		long offset = range.lowerEndpoint();
-		long size = range.upperEndpoint() - range.lowerEndpoint();
-		return provider.read(path, offset, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
-			try (var ch = Channels.newChannel(in)) {
-				long transferred = fc.transferFrom(ch, offset, size);
-				var transferredRange = Range.closedOpen(offset, offset + transferred);
-				synchronized (populatedRanges) {
-					populatedRanges.add(transferredRange);
-				}
+	private CompletionStage<Void> loadMissing(Range<Long> requestedRange) {
+		assert !populatedRanges.intersects(requestedRange); // synchronized by caller
+		long offset = requestedRange.lowerEndpoint();
+		long size = requestedRange.upperEndpoint() - requestedRange.lowerEndpoint();
+		return provider.read(path, offset, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(inputStream -> {
+			try (var in = inputStream) {
+				mergeData(requestedRange, in);
 				return CompletableFuture.completedFuture(null);
 			} catch (IOException e) {
 				return CompletableFuture.failedFuture(e);
 			}
 		});
+	}
+
+	/**
+	 * Writes data within the given <code>range</code> from <code>source</code> to
+	 * this file's FileChannel. Skips already populated ranges.
+	 * <p>
+	 * After merging, the file channel is fully populated within the given range,
+	 * unless hitting EOF on <code>source</code>.
+	 *
+	 * @param range  Where to place the data within the file channel
+	 * @param source The data source
+	 * @throws IOException
+	 */
+	void mergeData(Range<Long> range, InputStream source) throws IOException {
+		synchronized (populatedRanges) {
+			var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges);
+			long idx = range.lowerEndpoint();
+			for (var r : missingRanges.asRanges()) { // known to be sorted ascending
+				long offset = r.lowerEndpoint();
+				long size = r.upperEndpoint() - r.lowerEndpoint();
+				source.skip(offset - idx); // skip bytes between missing ranges (i.e. already populated)
+				long transferred = fc.transferFrom(Channels.newChannel(source), offset, size);
+				var transferredRange = Range.closedOpen(offset, offset + transferred);
+				populatedRanges.add(transferredRange);
+				idx = r.upperEndpoint();
+			}
+		}
 	}
 
 	void truncate(long size) throws IOException {
@@ -236,8 +262,8 @@ class OpenFile implements Closeable {
 	}
 
 	/**
+	 * TODO: Load before persist
 	 * Saves a copy of the data contained in this open file to the specified destination path.
-	 *
 	 * @param destination A path of a non-existing file in an existing directory.
 	 * @throws IOException
 	 */

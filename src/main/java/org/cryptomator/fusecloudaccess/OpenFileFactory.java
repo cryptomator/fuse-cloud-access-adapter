@@ -75,7 +75,8 @@ class OpenFileFactory {
 		}
 	}
 
-	private OpenFile createOpenFile(CloudPath path, long initialSize, Instant lastModified) {
+	//visible for testing
+	OpenFile createOpenFile(CloudPath path, long initialSize, Instant lastModified) {
 		try {
 			var tmpFile = cacheDir.resolve(UUID.randomUUID().toString());
 			return OpenFile.create(path, tmpFile, provider, initialSize, lastModified);

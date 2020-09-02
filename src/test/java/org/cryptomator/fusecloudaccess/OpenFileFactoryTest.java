@@ -15,7 +15,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
 
 public class OpenFileFactoryTest {
 
@@ -25,10 +24,13 @@ public class OpenFileFactoryTest {
 	private CloudProvider provider = Mockito.mock(CloudProvider.class);
 	private OpenFileUploader uploader = Mockito.mock(OpenFileUploader.class);
 	private OpenFileFactory openFileFactory;
+	private OpenFile openFile;
 
 	@BeforeEach
 	public void setup(@TempDir Path tmpDir) {
-		openFileFactory = new OpenFileFactory(provider, uploader, tmpDir);
+		openFileFactory = Mockito.spy(new OpenFileFactory(provider, uploader, tmpDir));
+		openFile = Mockito.mock(OpenFile.class);
+		Mockito.doReturn(openFile).when(openFileFactory).createOpenFile(Mockito.any(), Mockito.anyLong(), Mockito.any());
 	}
 
 	@Test
@@ -41,31 +43,29 @@ public class OpenFileFactoryTest {
 	}
 
 	@Test
-	@DisplayName("closing removes file handle")
+	@DisplayName("closing non-last file handle removes it without upload")
 	public void testClosingReleasesHandle() throws IOException {
 		var handle = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 		Assumptions.assumeTrue(openFileFactory.get(handle).isPresent());
+		Mockito.when(openFile.getPath()).thenReturn(Mockito.mock(CloudPath.class));
+		Mockito.when(openFile.released()).thenReturn(3);
 
 		openFileFactory.close(handle);
 
+		Mockito.verify(uploader, Mockito.never()).scheduleUpload(Mockito.any());
 		Assertions.assertFalse(openFileFactory.get(handle).isPresent());
 	}
 
 	@Test
 	@DisplayName("closing last file handle triggers upload")
 	public void testClosingLastHandleTriggersUpload() throws IOException {
-		var handle1 = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
-		var handle2 = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
-		var file1 = openFileFactory.get(handle1).get();
-		var file2 = openFileFactory.get(handle1).get();
-		Assertions.assertNotEquals(handle1, handle2);
-		Assertions.assertSame(file1, file2);
+		var handle = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
+		Assumptions.assumeTrue(openFile.equals(openFileFactory.get(handle).get()));
+		Mockito.when(openFile.getPath()).thenReturn(PATH);
+		Mockito.when(openFile.released()).thenReturn(0);
 
-		openFileFactory.close(handle1);
-		Mockito.verify(uploader, Mockito.never()).scheduleUpload(Mockito.any());
-
-		openFileFactory.close(handle2);
-		Mockito.verify(uploader).scheduleUpload(file1);
+		openFileFactory.close(handle);
+		Mockito.verify(uploader).scheduleUpload(openFile);
 	}
 
 	@Test
