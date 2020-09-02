@@ -31,39 +31,45 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static java.nio.file.StandardOpenOption.CREATE_NEW;
-import static java.nio.file.StandardOpenOption.READ;
-import static java.nio.file.StandardOpenOption.SPARSE;
-import static java.nio.file.StandardOpenOption.WRITE;
+import static java.nio.file.StandardOpenOption.*;
 
 class OpenFile implements Closeable {
 
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFile.class);
 
-	private final Path tmpFilePath;
 	private final FileChannel fc;
 	private final CloudProvider provider;
 	private final RangeSet<Long> populatedRanges;
 	private final AtomicInteger openFileHandles;
-	private final Set<Long> handles;
 	private CloudPath path;
 	private Instant lastModified;
 	private boolean dirty;
 
 	// visible for testing
-	OpenFile(CloudPath path, Path tmpFilePath, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified) {
+	OpenFile(CloudPath path, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified) {
 		this.path = path;
-		this.tmpFilePath = tmpFilePath;
 		this.fc = fc;
 		this.provider = provider;
 		this.populatedRanges = populatedRanges;
 		this.openFileHandles = new AtomicInteger();
 		this.lastModified = initialLastModified;
-		this.handles = new HashSet<>();
+	}
+
+	public static OpenFile create(CloudPath path, Path tmpFilePath, CloudProvider provider, long initialSize, Instant initialLastModified) throws IOException {
+		var fc = FileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE, DELETE_ON_CLOSE);
+		if (initialSize > 0) {
+			fc.write(ByteBuffer.allocateDirect(1), initialSize - 1); // grow file to initialSize
+		}
+		return new OpenFile(path, fc, provider, TreeRangeSet.create(), initialLastModified);
 	}
 
 	CloudPath getPath() {
 		return path;
+	}
+
+	public long getSize() throws IOException {
+		Preconditions.checkState(fc.isOpen());
+		return fc.size();
 	}
 
 	int opened() {
@@ -74,25 +80,40 @@ class OpenFile implements Closeable {
 		return openFileHandles.decrementAndGet();
 	}
 
-	Set<Long> getHandles() {
-		return handles;
+	void setDirty(boolean dirty) {
+		this.dirty = dirty;
+		if (dirty) {
+			this.lastModified = Instant.now();
+		}
 	}
 
-	public static OpenFile create(CloudPath path, Path tmpFilePath, CloudProvider provider, long initialSize, Instant initialLastModified) throws IOException {
-		var fc = FileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE);
-		if (initialSize > 0) {
-			fc.write(ByteBuffer.allocateDirect(1), initialSize - 1); // grow file to initialSize
+	boolean isDirty() {
+		return dirty && fc.isOpen();
+	}
+
+	void updatePath(CloudPath newPath) {
+		this.path = newPath;
+	}
+
+	void updateLastModified(Instant newLastModified) {
+		this.lastModified = newLastModified;
+	}
+
+	CloudItemMetadata getMetadata() {
+		Preconditions.checkState(fc.isOpen());
+		try {
+			return new CloudItemMetadata(path.getFileName().toString(), path, CloudItemType.FILE, Optional.of(lastModified), Optional.of(fc.size()));
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
 		}
-		return new OpenFile(path, tmpFilePath, fc, provider, TreeRangeSet.create(), initialLastModified);
 	}
 
 	@Override
 	public synchronized void close() {
 		try {
 			fc.close();
-			Files.delete(tmpFilePath);
 		} catch (IOException e) {
-			LOG.error("Failed to close tmp file " + tmpFilePath, e);
+			LOG.error("Failed to close tmp file.", e);
 		}
 	}
 
@@ -152,43 +173,9 @@ class OpenFile implements Closeable {
 		setDirty(true);
 	}
 
-
-	void setDirty(boolean dirty) {
-		this.dirty = dirty;
-		if (dirty) {
-			this.lastModified = Instant.now();
-		}
-	}
-
-	boolean isDirty() {
-		return dirty && fc.isOpen();
-	}
-
-	void updatePath(CloudPath newPath) {
-		this.path = newPath;
-	}
-
-	void updateLastModified(Instant newLastModified) {
-		this.lastModified = newLastModified;
-	}
-
-	CloudItemMetadata getMetadata() {
-		Preconditions.checkState(fc.isOpen());
-		try {
-			return new CloudItemMetadata(path.getFileName().toString(), path, CloudItemType.FILE, Optional.of(lastModified), Optional.of(fc.size()));
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
-		}
-	}
-
 	synchronized void persistTo(Path destination) throws IOException {
 		try (WritableByteChannel dst = Files.newByteChannel(destination, CREATE_NEW, WRITE)) {
 			fc.transferTo(0, fc.size(), dst);
 		}
-	}
-
-	public long getSize() throws IOException {
-		Preconditions.checkState(fc.isOpen());
-		return fc.size();
 	}
 }

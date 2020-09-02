@@ -70,7 +70,6 @@ class OpenFileFactory {
 			var handleId = FILE_HANDLE_GEN.incrementAndGet();
 			var fileHandle = new OpenFileHandle(openFile, handleId);
 			fileHandles.put(handleId, fileHandle);
-			openFile.getHandles().add(handleId);
 			return fileHandle;
 		} catch (UncheckedIOException e) {
 			throw new IOException(e);

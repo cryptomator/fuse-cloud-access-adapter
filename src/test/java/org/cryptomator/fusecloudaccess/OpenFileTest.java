@@ -33,30 +33,20 @@ import java.util.function.Consumer;
 public class OpenFileTest {
 
 	private CloudPath file;
-	private Path tmpFile;
-	private FileSystem tmpFileSystem;
-	private FileSystemProvider tmpFileSystemProvider;
 	private CloudProvider provider;
 	private FileChannel fileChannel;
 	private OpenFile openFile;
 	private RangeSet<Long> populatedRanges;
-	private Consumer<CloudPath> onRelease;
 
 	@BeforeEach
 	public void setup() throws IOException {
 		this.file = Mockito.mock(CloudPath.class, "/path/to/file");
-		this.tmpFile = Mockito.mock(Path.class, "/tmp/cache.file");
-		this.tmpFileSystem = Mockito.mock(FileSystem.class);
-		this.tmpFileSystemProvider = Mockito.mock(FileSystemProvider.class);
 		this.provider = Mockito.mock(CloudProvider.class);
 		this.fileChannel = Mockito.mock(FileChannel.class);
 		this.populatedRanges = Mockito.mock(RangeSet.class);
-		this.onRelease = Mockito.mock(Consumer.class);
-		this.openFile = new OpenFile(file, tmpFile, fileChannel, provider, populatedRanges, Instant.EPOCH);
+		this.openFile = new OpenFile(file, fileChannel, provider, populatedRanges, Instant.EPOCH);
 		Mockito.when(fileChannel.size()).thenReturn(100l);
 		Mockito.when(fileChannel.isOpen()).thenReturn(true);
-		Mockito.when(tmpFile.getFileSystem()).thenReturn(tmpFileSystem);
-		Mockito.when(tmpFileSystem.provider()).thenReturn(tmpFileSystemProvider);
 	}
 
 	@DisplayName("create new cached file")
@@ -66,7 +56,7 @@ public class OpenFileTest {
 		Path tmpFile = tmpDir.resolve("cache.file");
 		try (var cachedFile = OpenFile.create(file, tmpFile, provider, size, Instant.EPOCH)) {
 			Assertions.assertNotNull(cachedFile);
-			Assertions.assertEquals(size, Files.size(tmpFile));
+			Assertions.assertEquals(size, cachedFile.getSize());
 		}
 	}
 
