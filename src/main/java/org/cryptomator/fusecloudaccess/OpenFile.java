@@ -173,7 +173,13 @@ class OpenFile implements Closeable {
 		setDirty(true);
 	}
 
-	synchronized void persistTo(Path destination) throws IOException {
+	/**
+	 * Saves a copy of the data contained in this open file to the specified destination path.
+	 *
+	 * @param destination A path of a non-existing file in an existing directory.
+	 * @throws IOException
+	 */
+	public synchronized void persistTo(Path destination) throws IOException {
 		try (WritableByteChannel dst = Files.newByteChannel(destination, CREATE_NEW, WRITE)) {
 			fc.transferTo(0, fc.size(), dst);
 		}

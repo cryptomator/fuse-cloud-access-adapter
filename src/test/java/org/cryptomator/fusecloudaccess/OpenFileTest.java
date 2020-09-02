@@ -58,6 +58,19 @@ public class OpenFileTest {
 			Assertions.assertNotNull(cachedFile);
 			Assertions.assertEquals(size, cachedFile.getSize());
 		}
+		Assertions.assertTrue(Files.notExists(tmpFile));
+	}
+
+	@Test
+	public void testPersist(@TempDir Path tmpDir) throws IOException {
+		Path tmpFile = tmpDir.resolve("cache.file");
+		Path persistentFile = tmpDir.resolve("persistent.file");
+		try (var cachedFile = OpenFile.create(file, tmpFile, provider, 100, Instant.EPOCH)) {
+			cachedFile.persistTo(persistentFile);
+		}
+		Assertions.assertTrue(Files.notExists(tmpFile));
+		Assertions.assertTrue(Files.exists(persistentFile));
+		Assertions.assertEquals(100, Files.size(persistentFile));
 	}
 
 	@Test
