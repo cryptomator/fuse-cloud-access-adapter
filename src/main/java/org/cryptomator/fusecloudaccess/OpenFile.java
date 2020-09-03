@@ -58,6 +58,17 @@ class OpenFile implements Closeable {
 		this.lastModified = initialLastModified;
 	}
 
+	/**
+	 * Creates a cached representation of a file. File contents are loaded on demand from the provided cloud provider.
+	 *
+	 * @param path                The path of this file in the cloud
+	 * @param tmpFilePath         Where to store the volatile cache
+	 * @param provider            The cloud provider used to load and persist file contents
+	 * @param initialSize         Must be 0 for newly created files. (Use {@link #truncate(long)} if you want to grow it)
+	 * @param initialLastModified The initial modification date to report until further writes happen
+	 * @return The created file
+	 * @throws IOException I/O errors during creation of the cache file located at <code>tmpFilePath</code>
+	 */
 	public static OpenFile create(CloudPath path, Path tmpFilePath, CloudProvider provider, long initialSize, Instant initialLastModified) throws IOException {
 		var fc = FileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE, DELETE_ON_CLOSE);
 		if (initialSize > 0) {
@@ -66,8 +77,12 @@ class OpenFile implements Closeable {
 		return new OpenFile(path, fc, provider, TreeRangeSet.create(), initialLastModified);
 	}
 
-	CloudPath getPath() {
+	public CloudPath getPath() {
 		return path;
+	}
+
+	public void updatePath(CloudPath newPath) {
+		this.path = newPath;
 	}
 
 	/**
@@ -85,11 +100,11 @@ class OpenFile implements Closeable {
 		}
 	}
 
-	int opened() {
+	public int opened() {
 		return openFileHandles.incrementAndGet();
 	}
 
-	int released() {
+	public int released() {
 		return openFileHandles.decrementAndGet();
 	}
 
@@ -104,10 +119,7 @@ class OpenFile implements Closeable {
 		return dirty && fc.isOpen();
 	}
 
-	void updatePath(CloudPath newPath) {
-		this.path = newPath;
-	}
-
+	@Deprecated
 	void updateLastModified(Instant newLastModified) {
 		this.lastModified = newLastModified;
 	}
@@ -198,6 +210,7 @@ class OpenFile implements Closeable {
 	 * @param offset First byte to read (inclusive), which must not exceed the file's size
 	 * @param count  Number of bytes to load
 	 */
+	// visible for testing
 	CompletionStage<Void> load(long offset, long count) {
 		Preconditions.checkArgument(offset >= 0);
 		Preconditions.checkArgument(count >= 0);
@@ -250,6 +263,7 @@ class OpenFile implements Closeable {
 	 * @param source The data source
 	 * @throws IOException
 	 */
+	// visible for testing
 	void mergeData(Range<Long> range, InputStream source) throws IOException {
 		synchronized (populatedRanges) {
 			var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges);
@@ -266,16 +280,31 @@ class OpenFile implements Closeable {
 		}
 	}
 
-	void truncate(long size) throws IOException {
+	/**
+	 * Grows _or_ shrinks the file to the requested size.
+	 *
+	 * @param size
+	 * @throws IOException
+	 */
+	public void truncate(long size) throws IOException {
 		Preconditions.checkState(fc.isOpen());
-		markPopulatedIfGrowing(size);
-		fc.truncate(size);
+		if (size < fc.size()) {
+			fc.truncate(size);
+		} else if (size > fc.size()) {
+			assert size > 0;
+			markPopulatedIfGrowing(size);
+			fc.write(ByteBuffer.allocateDirect(1), size - 1);
+		} else {
+			assert size == fc.size();
+			return; // no-op
+		}
 		setDirty(true);
 	}
 
 	/**
 	 * When growing a file beyond its current size, mark the grown region as populated.
 	 * This prevents unnecessary calls to {@link CloudProvider#read(CloudPath, long, long, ProgressListener) provider.read(...)}.
+	 *
 	 * @param newSize
 	 */
 	private void markPopulatedIfGrowing(long newSize) {

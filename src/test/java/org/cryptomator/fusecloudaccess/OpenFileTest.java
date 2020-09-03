@@ -82,7 +82,8 @@ public class OpenFileTest {
 		Path tmpFile = tmpDir.resolve("cache.file");
 		Path persistentFile = tmpDir.resolve("persistent.file");
 
-		try (var cachedFile = OpenFile.create(file, tmpFile, provider, 100, Instant.EPOCH)) {
+		try (var cachedFile = OpenFile.create(file, tmpFile, provider, 0, Instant.EPOCH)) {
+			cachedFile.truncate(100l);
 			cachedFile.persistTo(persistentFile);
 		}
 
@@ -344,16 +345,48 @@ public class OpenFileTest {
 
 	}
 
+	@Nested
 	@DisplayName("truncate(...)")
-	@ParameterizedTest(name = "truncate({0})")
-	@ValueSource(longs = {0l, 1l, 2l, 3l})
-	public void testTruncate(long size) throws IOException {
-		openFile.truncate(size);
-		Mockito.when(fileChannel.size()).thenReturn(size);
+	public class Truncate {
 
-		Mockito.verify(fileChannel).truncate(size);
-		Assertions.assertEquals(size, openFile.getSize());
-		Assertions.assertTrue(openFile.isDirty());
+		@BeforeEach
+		public void setup() {
+			Assumptions.assumeTrue(openFile.getSize() == 100l);
+			Assumptions.assumeFalse(openFile.isDirty());
+		}
+
+		@DisplayName("shrinking (new size < 100)")
+		@ParameterizedTest(name = "truncate({0})")
+		@ValueSource(longs = {0l, 1l, 99l})
+		public void testShrink(long size) throws IOException {
+			openFile.truncate(size);
+
+			Mockito.verify(fileChannel).truncate(size);
+			Mockito.verify(fileChannel, Mockito.never()).write(Mockito.any(), Mockito.anyLong());
+			Assertions.assertTrue(openFile.isDirty());
+		}
+
+		@DisplayName("growing (new size > 100)")
+		@ParameterizedTest(name = "truncate({0})")
+		@ValueSource(longs = {101l, 150l})
+		public void testGrow(long size) throws IOException {
+			openFile.truncate(size);
+
+			Mockito.verify(fileChannel, Mockito.never()).truncate(Mockito.anyLong());
+			Mockito.verify(fileChannel).write(Mockito.argThat(b -> b.remaining() == 1), Mockito.eq(size - 1));
+			Assertions.assertTrue(openFile.isDirty());
+		}
+
+		@Test
+		@DisplayName("no-op (new size == 100)")
+		public void testNoop() throws IOException {
+			openFile.truncate(100l);
+
+			Mockito.verify(fileChannel, Mockito.never()).truncate(Mockito.anyLong());
+			Mockito.verify(fileChannel, Mockito.never()).write(Mockito.any(), Mockito.anyLong());
+			Assertions.assertFalse(openFile.isDirty());
+		}
+
 	}
 
 	@DisplayName("getMetadata()")

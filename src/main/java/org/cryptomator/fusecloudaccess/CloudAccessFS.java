@@ -33,6 +33,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
@@ -497,29 +498,19 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	public int truncate(String path, long size) {
 		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
-			var returnCode = truncateInternal(CloudPath.of(path), size);
 			LOG.trace("truncate {} (size: {})", path, size);
-			return returnOrTimeout(returnCode);
-		} catch (Exception e) {
+			truncateInternal(CloudPath.of(path), size);
+			return 0;
+		} catch (IOException e) {
 			LOG.error("truncate() failed", e);
 			return -ErrorCodes.EIO();
 		}
 	}
 
-	private CompletionStage<Integer> truncateInternal(CloudPath path, long size) {
-		return provider.read(path, 0, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
-			// TODO optimize tmp file path
-			try (var ch = FileChannel.open(Files.createTempFile("foo", "bar"), StandardOpenOption.READ, StandardOpenOption.WRITE)) {
-				long copied = ByteStreams.copy(in, Channels.newOutputStream(ch));
-				if (copied < size) {
-					// TODO append
-				}
-				ch.position(0);
-				return provider.write(path, true, Channels.newInputStream(ch), size, ProgressListener.NO_PROGRESS_AWARE).thenApply(ignored -> 0);
-			} catch (IOException e) {
-				return CompletableFuture.failedFuture(e);
-			}
-		});
+	private void truncateInternal(CloudPath path, long size) throws IOException {
+		var fileHandle = openFileFactory.open(path, EnumSet.of(OpenFlags.O_WRONLY), size, Instant.now());
+		openFileFactory.get(fileHandle).get().truncate(size);
+		openFileFactory.close(fileHandle);
 	}
 
 	@Override
