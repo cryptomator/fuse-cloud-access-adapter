@@ -87,12 +87,12 @@ class OpenFileUploader {
 		return task;
 	}
 
-	//TODO: cancel does not close the input stream of the canceled job. CHANGE THIS FOR GODS SAKE!
+	// TODO: cancel does not close the input stream of the canceled job. CHANGE THIS FOR GODS SAKE!
 	public synchronized void cancel(CloudPath path) {
 		LOG.trace("Cancel possible pending upload for {}", path);
-		boolean result = scheduledUploads.get(path).toCompletableFuture().cancel(true); //TODO: testen, testen, testen
-		if (!result) {
-			LOG.debug("Upload for {} could not be canceled.", path);
+		var upload = scheduledUploads.get(path);
+		if (upload != null) {
+			upload.toCompletableFuture().cancel(true);
 		}
 	}
 
