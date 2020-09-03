@@ -70,9 +70,19 @@ class OpenFile implements Closeable {
 		return path;
 	}
 
-	public long getSize() throws IOException {
+	/**
+	 * Gets the total size of this file.
+	 * The size is set during creation of the file and only modified by {@link #truncate(long)} and {@link #write(Pointer, long, long)}.
+	 *
+	 * @return The current size of the cached file.
+	 */
+	public long getSize() {
 		Preconditions.checkState(fc.isOpen());
-		return fc.size();
+		try {
+			return fc.size();
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
 	}
 
 	int opened() {
@@ -102,6 +112,7 @@ class OpenFile implements Closeable {
 		this.lastModified = newLastModified;
 	}
 
+	@Deprecated
 	CloudItemMetadata getMetadata() {
 		Preconditions.checkState(fc.isOpen());
 		try {
@@ -165,6 +176,7 @@ class OpenFile implements Closeable {
 		Preconditions.checkState(fc.isOpen());
 		assert size < Integer.MAX_VALUE; // technically an unsigned integer in the c header file
 		setDirty(true);
+		markPopulatedIfGrowing(offset);
 		long pos = offset;
 		while (pos < offset + size) {
 			int n = (int) Math.min(BUFFER_SIZE, size - (pos - offset)); // int-cast: n <= BUFFER_SIZE
@@ -204,7 +216,6 @@ class OpenFile implements Closeable {
 					var desiredCount = Math.max(count, READAHEAD_SIZE); // reads at least the readahead
 					var desiredLastByte = Math.min(size, offset + desiredCount); // reads not behind eof (lastByte is exclusive!)
 					var desiredRange = Range.closedOpen(offset, desiredLastByte);
-
 					var missingRanges = ImmutableRangeSet.of(desiredRange).difference(populatedRanges);
 					return CompletableFuture.allOf(missingRanges.asRanges().stream().map(this::loadMissing).toArray(CompletableFuture[]::new));
 				}
@@ -257,19 +268,40 @@ class OpenFile implements Closeable {
 
 	void truncate(long size) throws IOException {
 		Preconditions.checkState(fc.isOpen());
+		markPopulatedIfGrowing(size);
 		fc.truncate(size);
 		setDirty(true);
 	}
 
 	/**
-	 * TODO: Load before persist
-	 * Saves a copy of the data contained in this open file to the specified destination path.
-	 * @param destination A path of a non-existing file in an existing directory.
-	 * @throws IOException
+	 * When growing a file beyond its current size, mark the grown region as populated.
+	 * This prevents unnecessary calls to {@link CloudProvider#read(CloudPath, long, long, ProgressListener) provider.read(...)}.
+	 * @param newSize
 	 */
-	public synchronized void persistTo(Path destination) throws IOException {
-		try (WritableByteChannel dst = Files.newByteChannel(destination, CREATE_NEW, WRITE)) {
-			fc.transferTo(0, fc.size(), dst);
+	private void markPopulatedIfGrowing(long newSize) {
+		long oldSize = getSize();
+		if (newSize > oldSize) {
+			synchronized (populatedRanges) {
+				populatedRanges.add(Range.closedOpen(oldSize, newSize));
+			}
 		}
+	}
+
+	/**
+	 * Saves a copy of the data contained in this open file to the specified destination path.
+	 * If there are any uncached ranges within this file, they'll get loaded before.
+	 *
+	 * @param destination A path of a non-existing file in an existing directory.
+	 * @return A CompletionStage completed as soon as all data is written.
+	 */
+	public synchronized CompletionStage<Void> persistTo(Path destination) {
+		return load(0, getSize()).thenCompose(ignored -> {
+			try (WritableByteChannel dst = Files.newByteChannel(destination, CREATE_NEW, WRITE)) {
+				fc.transferTo(0, fc.size(), dst);
+				return CompletableFuture.completedFuture(null);
+			} catch (IOException e) {
+				return CompletableFuture.failedFuture(e);
+			}
+		});
 	}
 }
