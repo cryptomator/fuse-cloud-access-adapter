@@ -325,6 +325,7 @@ class OpenFile implements Closeable {
 	 * @return A CompletionStage completed as soon as all data is written.
 	 */
 	public synchronized CompletionStage<Void> persistTo(Path destination) {
+		Preconditions.checkState(fc.isOpen());
 		return load(0, getSize()).thenCompose(ignored -> {
 			try (WritableByteChannel dst = Files.newByteChannel(destination, CREATE_NEW, WRITE)) {
 				fc.transferTo(0, fc.size(), dst);
