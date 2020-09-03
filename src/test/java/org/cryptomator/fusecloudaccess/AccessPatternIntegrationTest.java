@@ -4,6 +4,7 @@ import jnr.ffi.Pointer;
 import jnr.ffi.Runtime;
 import jnr.ffi.provider.jffi.ByteBufferMemoryIO;
 import org.cryptomator.cloudaccess.CloudAccess;
+import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Base64;
 
 import static java.nio.charset.StandardCharsets.US_ASCII;
 
@@ -212,6 +214,32 @@ public class AccessPatternIntegrationTest {
 		FuseFileInfo fi3 = TestFileInfo.create();
 		fs.create(p, 0644, fi3);
 		Assertions.assertEquals(0, fs.getattr(p, stat));
+	}
+
+	@Test
+	@Disabled // requires java.library.path to be set
+	@DisplayName("simulates \"get attributes during write\" access pattern")
+	void testGetAttributesDuringWrite() {
+		provider = CloudAccess.vaultFormat8GCMCloudAccess(CloudAccess.toLocalFileSystem(this.mirrored), CloudPath.of("/"), Base64.getDecoder().decode("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="));
+		fs = new CloudAccessFS(provider, this.cacheDir, 1000);
+
+		var path = "/foo.txt";
+
+		// echo "asd" > foo.txt
+		FuseFileInfo fi1 = TestFileInfo.create();
+		fs.create(path, 0644, fi1);
+		fs.write(path, mockPointer(US_ASCII.encode("asd")), 3, 0, fi1);
+
+		TestFileStat stat1 = TestFileStat.create();
+		fs.getattr(path, stat1);
+		Assertions.assertEquals(3, stat1.st_size.intValue());
+
+		fs.write(path, mockPointer(US_ASCII.encode("asd")), 3, 3, fi1);
+
+		fs.getattr(path, stat1);
+		Assertions.assertEquals(6, stat1.st_size.intValue());
+
+		fs.release(path, fi1);
 	}
 
 	private Pointer mockPointer(ByteBuffer buf) {
