@@ -157,10 +157,25 @@ public class OpenFileTest {
 			Mockito.doReturn(CompletableFuture.completedFuture(null)).when(fileSpy).load(Mockito.anyLong(), Mockito.anyLong());
 		}
 
+		@DisplayName("no-op read (offset >= EOF)")
+		@ParameterizedTest(name = "read(buf, {0}, 10)")
+		@ValueSource(longs = {100l, 101l})
+		public void testReadBeyondEof(long offset) throws IOException {
+			Mockito.when(fileChannel.size()).thenReturn(100l);
+			var buf = Mockito.mock(Pointer.class);
+
+			var futureResult = fileSpy.read(buf, offset, 10);
+			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+
+			Assertions.assertEquals(0, result);
+			Mockito.verify(fileSpy, Mockito.never()).load(Mockito.anyLong(), Mockito.anyLong());
+		}
+
 		@DisplayName("successful read")
 		@ParameterizedTest(name = "read(buf, 100, {0})")
 		@ValueSource(ints = {0, 100, 1023, 1024, 1025, 10_000})
 		public void testReadSuccess(int readSize) throws IOException {
+			Mockito.when(fileChannel.size()).thenReturn(100_000l);
 			long readOffset = 100;
 			var content = new byte[readSize];
 			var transferred = new byte[readSize];
@@ -186,10 +201,10 @@ public class OpenFileTest {
 			var futureResult = fileSpy.read(buf, readOffset, readSize);
 			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
-			Mockito.verify(fileSpy).load(readOffset, readSize);
 			Assertions.assertEquals(readSize, result);
 			Assertions.assertFalse(fileSpy.isDirty());
 			Assertions.assertArrayEquals(content, transferred);
+			Mockito.verify(fileSpy).load(readOffset, readSize);
 		}
 
 		@Test
@@ -203,8 +218,8 @@ public class OpenFileTest {
 				Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 			});
 
-			Mockito.verify(fileSpy).load(42, 1024);
 			Assertions.assertEquals(e, thrown.getCause());
+			Mockito.verify(fileSpy).load(42, 1024);
 		}
 
 		@Test
@@ -218,8 +233,8 @@ public class OpenFileTest {
 				Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 			});
 
-			Mockito.verify(fileSpy).load(42, 1024);
 			Assertions.assertEquals(e, thrown.getCause());
+			Mockito.verify(fileSpy).load(42, 1024);
 		}
 
 	}

@@ -154,6 +154,10 @@ class OpenFile implements Closeable {
 	 */
 	public CompletionStage<Integer> read(Pointer buf, long offset, long size) {
 		Preconditions.checkState(fc.isOpen());
+		if (offset >= getSize()) {
+			// reads starting beyond EOF are no-op
+			return CompletableFuture.completedFuture(0);
+		}
 		return load(offset, size).thenCompose(ignored -> {
 			try {
 				long pos = offset;
