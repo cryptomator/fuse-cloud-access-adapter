@@ -50,9 +50,15 @@ class OpenFileFactory {
 	 */
 	public long open(CloudPath path, Set<OpenFlags> flags, long initialSize, Instant lastModified) throws IOException {
 		try {
+			if( flags.contains(OpenFlags.O_RDWR) || flags.contains(OpenFlags.O_WRONLY)) {
+				uploader.cancel(path);
+			}
 			OpenFile openFile;
-			synchronized (this) {
-				openFile = activeFiles.computeIfAbsent(path, p -> {
+				openFile = activeFiles.compute(path, (p, activeFile) -> {
+					if( activeFile != null){
+						activeFile.opened();
+						return activeFile;
+					}
 					var cachedFile = cachedFiles.getIfPresent(p);
 					if (cachedFile != null) {
 						cachedFiles.invalidate(p);
@@ -62,8 +68,6 @@ class OpenFileFactory {
 						return this.createOpenFile(p, initialSize, lastModified);
 					}
 				});
-				openFile.opened();
-			}
 			if (flags.contains(OpenFlags.O_TRUNC)) {
 				openFile.truncate(0);
 			}
@@ -90,14 +94,18 @@ class OpenFileFactory {
 	}
 
 	/**
-	 * Updates existing cached data for <code>newPath</code> (if any) with contents formerly mapped to <code>oldPath</code> and invalidates <code>oldPath</code>.
+	 * Updates existing cached data for <code>newPath</code> (if any) with contents formerly mapped to <code>oldPath</code>,
+	 * invalidates <code>oldPath</code> and cancel pending uploads for both paths (if any).
 	 * <p>
 	 * Cached data previously mapped to <code>newPath</code> will be discarded. No-op if no data cached for either path.
+	 * <p>
 	 *
 	 * @param oldPath Path to a cached file before it has been moved
 	 * @param newPath New path which is used to access the cached file
 	 */
 	public synchronized void moved(CloudPath oldPath, CloudPath newPath) {
+		//uploader.cancel(oldPath);
+		//uploader.cancel(newPath);
 		var previouslyActiveFile = activeFiles.remove(newPath);
 		if (previouslyActiveFile != null) {
 			previouslyActiveFile.close();
@@ -106,6 +114,7 @@ class OpenFileFactory {
 		if (activeFile != null) {
 			activeFile.updatePath(newPath);
 			activeFiles.put(newPath, activeFile);
+			//TODO: if an upload for oldPath already existed, we need to trigger a new one for new path
 		}
 		cachedFiles.invalidate(newPath);
 		var cachedFile = cachedFiles.getIfPresent(oldPath);
@@ -119,11 +128,13 @@ class OpenFileFactory {
 	/**
 	 * Invalidates any mapping for the given <code>path</code>.
 	 * <p>
-	 * Cached data for the given <code>path</code> will be discarded. No-op if no data is cached for the given path.
+	 * Cached data for the given <code>path</code> will be discarded and any pending upload from a previous change is canceled.
+	 * No-op if no data is cached for the given path.
 	 *
 	 * @param path Path to a cached file
 	 */
 	public synchronized void delete(CloudPath path) {
+		uploader.cancel(path);
 		activeFiles.compute(path, (p, openFile) -> {
 			if (openFile != null) {
 				openFile.close();
@@ -144,14 +155,19 @@ class OpenFileFactory {
 			LOG.warn("No such file handle: {}", handleId);
 			return;
 		}
+		var path = file.getPath();
 		synchronized (this) {
-			var path = file.getPath();
+			//This is needed because a delete should be completed before we ask for containsKey
 			if (file.released() == 0 && activeFiles.containsKey(path)) {
-				// transition from active to cached state
-				activeFiles.remove(path);
-				cachedFiles.put(path, file);
-				uploader.scheduleUpload(file);
+				uploader.scheduleUpload(file).thenAccept(this::onFinishedUpload); // transition from active to cached state after successful upload
 			}
+		}
+	}
+
+	private synchronized void onFinishedUpload(CloudPath p){
+		var file = activeFiles.remove(p);
+		if( file != null){
+			cachedFiles.put(p, file);
 		}
 	}
 

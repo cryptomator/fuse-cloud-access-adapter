@@ -1,5 +1,6 @@
 package org.cryptomator.fusecloudaccess;
 
+import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.slf4j.Logger;
@@ -15,7 +16,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Prepares and schedules upload of (possibly) changed files to the cloud.
@@ -27,8 +27,7 @@ class OpenFileUploader {
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFileUploader.class);
 
 	private final CloudProvider provider;
-	private final ConcurrentMap<Long, CompletionStage<Void>> scheduledUploads = new ConcurrentHashMap<>();
-	private final AtomicLong idGenerator = new AtomicLong();
+	private final ConcurrentMap<CloudPath, CompletionStage<CloudPath>> scheduledUploads = new ConcurrentHashMap<>();
 	private final Path cacheDir;
 
 	OpenFileUploader(CloudProvider provider, Path cacheDir) {
@@ -46,12 +45,13 @@ class OpenFileUploader {
 	 * @param file OpenFile object with reference to a real file.
 	 * @return A void {@link CompletionStage} indicating when the upload operation is successful completed.
 	 */
-	public CompletionStage<Void> scheduleUpload(OpenFile file) {
+	public CompletionStage<CloudPath> scheduleUpload(OpenFile file) {
 		if (!file.isDirty()) {
 			LOG.trace("Upload of {} skipped. Unmodified.", file.getPath());
 			return CompletableFuture.completedFuture(null);
 		}
 		try {
+			//TODO: cancel previous uploads
 			Path toUpload = cacheDir.resolve(UUID.randomUUID() + ".tmp");
 			file.persistTo(toUpload);
 			file.setDirty(false);
@@ -64,28 +64,36 @@ class OpenFileUploader {
 		}
 	}
 
-	private CompletionStage<Void> scheduleUpload(OpenFile file, InputStream in, long size) {
+	private CompletionStage<CloudPath> scheduleUpload(OpenFile file, InputStream in, long size) {
 		var path = file.getPath();
 		LOG.debug("uploading {}...", path);
-		long id = idGenerator.incrementAndGet();
 		var task = provider.write(path, true, in, size, ProgressListener.NO_PROGRESS_AWARE)
-				.thenRun(() -> {
-					LOG.debug("uploaded successfully: {}", path);
-				}).exceptionally(e -> {
+				.thenRun(() -> LOG.debug("uploaded successfully: {}", path))
+				.exceptionally(e -> {
 					LOG.error("Upload of " + path + " failed.", e);
 					// TODO copy file to some lost+found dir
 					file.setDirty(true); // might cause an additional upload
 					return null;
-				}).thenRun(() -> {
-					scheduledUploads.remove(id);
+				}).thenApply(ignored -> {
+					scheduledUploads.remove(path); //TODO: document it (behaviour)
 					try {
 						in.close();
 					} catch (IOException e) {
 						LOG.error("Unable to close channel to temporary file, will be closed on program exit.", e);
 					}
+					return path;
 				});
-		scheduledUploads.put(id, task);
+		scheduledUploads.put(path, task);
 		return task;
+	}
+
+	//TODO: cancel does not close the input stream of the canceled job. CHANGE THIS FOR GODS SAKE!
+	public synchronized void cancel(CloudPath path) {
+		LOG.trace("Cancel possible pending upload for {}", path);
+		boolean result = scheduledUploads.get(path).toCompletableFuture().cancel(true); //TODO: testen, testen, testen
+		if (!result) {
+			LOG.debug("Upload for {} could not be canceled.", path);
+		}
 	}
 
 	public CompletionStage<Void> awaitPendingUploads() {

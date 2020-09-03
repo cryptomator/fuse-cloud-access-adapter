@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 public class OpenFileFactoryTest {
 
@@ -63,6 +64,7 @@ public class OpenFileFactoryTest {
 		Assumptions.assumeTrue(openFile.equals(openFileFactory.get(handle).get()));
 		Mockito.when(openFile.getPath()).thenReturn(PATH);
 		Mockito.when(openFile.released()).thenReturn(0);
+		Mockito.when(uploader.scheduleUpload(openFile)).thenReturn(CompletableFuture.completedFuture(PATH));
 
 		openFileFactory.close(handle);
 		Mockito.verify(uploader).scheduleUpload(openFile);

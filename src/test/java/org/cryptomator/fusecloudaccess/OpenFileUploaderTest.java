@@ -66,7 +66,7 @@ public class OpenFileUploaderTest {
 		var futureResult = uploader.scheduleUpload(file);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
-		Assertions.assertNull(result);
+		Assertions.assertEquals(file.getPath(), result);
 		Mockito.verify(provider).write(Mockito.eq(path), Mockito.eq(true), Mockito.any(), Mockito.anyLong(), Mockito.any());
 		Mockito.verify(file).setDirty(false);
 	}
@@ -85,7 +85,7 @@ public class OpenFileUploaderTest {
 		var futureResult = uploader.scheduleUpload(file);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
-		Assertions.assertNull(result);
+		Assertions.assertEquals(file.getPath(), result);
 		Mockito.verify(file).setDirty(false);
 		Mockito.verify(file).setDirty(true);
 	}
@@ -115,7 +115,7 @@ public class OpenFileUploaderTest {
 		var futureResult = uploader.scheduleUpload(file);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
-		Assertions.assertNull(result);
+		Assertions.assertEquals(file.getPath(), result);
 		Assertions.assertTrue(isEmptyDir(cacheDir));
 	}
 
@@ -134,7 +134,7 @@ public class OpenFileUploaderTest {
 		var futureResult = uploader.scheduleUpload(file);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
-		Assertions.assertNull(result);
+		Assertions.assertEquals(file.getPath(), result);
 		Assertions.assertTrue(isEmptyDir(cacheDir));
 	}
 
