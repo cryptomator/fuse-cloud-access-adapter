@@ -290,15 +290,16 @@ class OpenFile implements Closeable {
 		Preconditions.checkState(fc.isOpen());
 		if (size < fc.size()) {
 			fc.truncate(size);
+			setDirty(true);
 		} else if (size > fc.size()) {
 			assert size > 0;
 			markPopulatedIfGrowing(size);
 			fc.write(ByteBuffer.allocateDirect(1), size - 1);
+			setDirty(true);
 		} else {
 			assert size == fc.size();
-			return; // no-op
+			// no-op
 		}
-		setDirty(true);
 	}
 
 	/**
