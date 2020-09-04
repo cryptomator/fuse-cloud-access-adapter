@@ -23,7 +23,6 @@ import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 import ru.serce.jnrfuse.struct.Statvfs;
 
-import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
@@ -462,8 +461,6 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		return openFile.get().read(buf, offset, size).exceptionally(e -> {
 			if (e instanceof NotFoundException) {
 				return -ErrorCodes.ENOENT();
-			} else if (e instanceof EOFException) {
-				return 0; // offset was at or beyond EOF
 			} else {
 				LOG.error("read() failed", e);
 				return -ErrorCodes.EIO();

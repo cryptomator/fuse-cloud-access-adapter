@@ -22,7 +22,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
-import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -243,6 +242,18 @@ public class OpenFileTest {
 			Mockito.doNothing().when(fileSpy).mergeData(Mockito.any(), Mockito.any());
 		}
 
+		@DisplayName("load 0 bytes")
+		@ParameterizedTest(name = "region [{0}, ...]")
+		@ValueSource(longs = {0l, 1l, 99l, 100l, 101l})
+		public void testLoadZero(long offset) throws IOException {
+			Mockito.when(fileChannel.size()).thenReturn(100l);
+
+			var futureResult = fileSpy.load(offset, 0);
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+
+			Mockito.verify(fileSpy, Mockito.never()).mergeData(Mockito.any(), Mockito.any());
+		}
+
 		@DisplayName("region behind at EOF (100)")
 		@ParameterizedTest(name = "region [{0}, ...]")
 		@ValueSource(longs = {100l, 101l})
@@ -254,7 +265,7 @@ public class OpenFileTest {
 
 			Mockito.verify(fileSpy, Mockito.never()).mergeData(Mockito.any(), Mockito.any());
 			Assertions.assertTrue(futureResult.toCompletableFuture().isCompletedExceptionally());
-			MatcherAssert.assertThat(thrown.getCause(), CoreMatchers.instanceOf(EOFException.class));
+			MatcherAssert.assertThat(thrown.getCause(), CoreMatchers.instanceOf(IllegalArgumentException.class));
 		}
 
 		@Test

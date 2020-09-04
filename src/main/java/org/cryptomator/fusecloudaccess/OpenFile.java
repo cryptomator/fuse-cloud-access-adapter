@@ -14,7 +14,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
-import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -131,21 +130,21 @@ class OpenFile implements Closeable {
 	 *
 	 * @param buf    Buffer
 	 * @param offset Position of first byte to read
-	 * @param size   Number of bytes to read
+	 * @param count   Number of bytes to read
 	 * @return A CompletionStage either containing the actual number of bytes read (can be less than {@code size} if reached EOF)
 	 * or failing with an {@link IOException}
 	 */
-	public CompletionStage<Integer> read(Pointer buf, long offset, long size) {
+	public CompletionStage<Integer> read(Pointer buf, long offset, long count) {
 		Preconditions.checkState(fc.isOpen());
 		if (offset >= getSize()) {
 			// reads starting beyond EOF are no-op
 			return CompletableFuture.completedFuture(0);
 		}
-		return load(offset, size).thenCompose(ignored -> {
+		return load(offset, count).thenCompose(ignored -> {
 			try {
 				long pos = offset;
-				while (pos < offset + size) {
-					int n = (int) Math.min(BUFFER_SIZE, size - (pos - offset)); // int-cast: n <= BUFFER_SIZE
+				while (pos < offset + count) {
+					int n = (int) Math.min(BUFFER_SIZE, count - (pos - offset)); // int-cast: n <= BUFFER_SIZE
 					var out = new ByteArrayOutputStream();
 					long transferred = fc.transferTo(pos, n, Channels.newChannel(out));
 					assert transferred == out.size();
@@ -168,18 +167,18 @@ class OpenFile implements Closeable {
 	 *
 	 * @param buf    Buffer
 	 * @param offset Position of first byte to write
-	 * @param size   Number of bytes to write
+	 * @param count   Number of bytes to write
 	 * @return A CompletionStage either containing the actual number of bytes written or failing with an {@link IOException}
 	 */
-	public int write(Pointer buf, long offset, long size) throws IOException {
+	public int write(Pointer buf, long offset, long count) throws IOException {
 		Preconditions.checkState(fc.isOpen());
-		assert size < Integer.MAX_VALUE; // technically an unsigned integer in the c header file
+		assert count < Integer.MAX_VALUE; // technically an unsigned integer in the c header file
 		setDirty(true);
 		setLastModified(Instant.now());
 		markPopulatedIfGrowing(offset);
 		long pos = offset;
-		while (pos < offset + size) {
-			int n = (int) Math.min(BUFFER_SIZE, size - (pos - offset)); // int-cast: n <= BUFFER_SIZE
+		while (pos < offset + count) {
+			int n = (int) Math.min(BUFFER_SIZE, count - (pos - offset)); // int-cast: n <= BUFFER_SIZE
 			byte[] tmp = new byte[n];
 			buf.get(pos - offset, tmp, 0, n);
 			pos += fc.write(ByteBuffer.wrap(tmp), pos);
@@ -203,10 +202,13 @@ class OpenFile implements Closeable {
 		Preconditions.checkArgument(offset >= 0);
 		Preconditions.checkArgument(count >= 0);
 		Preconditions.checkState(fc.isOpen());
+		if (count == 0) { // nothing to load
+			return CompletableFuture.completedFuture(null);
+		}
 		try {
 			var size = fc.size();
 			if (offset >= size) {
-				throw new EOFException("Requested range beyond EOF");
+				throw new IllegalArgumentException("offset beyond EOF");
 			}
 			var requiredLastByte = Math.min(size, offset + count); // reads not behind eof (lastByte is exclusive!)
 			var requiredRange = Range.closedOpen(offset, requiredLastByte);
