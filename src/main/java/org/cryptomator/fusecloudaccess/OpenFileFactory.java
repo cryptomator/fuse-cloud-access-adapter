@@ -25,6 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 class OpenFileFactory {
 
@@ -114,7 +115,6 @@ class OpenFileFactory {
 		uploader.cancelUpload(newPath);
 		var activeFile = activeFiles.remove(oldPath);
 		activeFiles.compute(newPath, (p, previouslyActiveFile) -> {
-			assert previouslyActiveFile != activeFile;
 			if (previouslyActiveFile != null) {
 				previouslyActiveFile.close();
 			}
@@ -184,11 +184,14 @@ class OpenFileFactory {
 	 * @return Optional metadata, which is present if cached
 	 */
 	public Optional<CloudItemMetadata> getCachedMetadata(CloudPath path) {
-		return Optional.ofNullable(activeFiles.get(path)).map(file -> {
+		AtomicReference<CloudItemMetadata> result = new AtomicReference<>();
+		activeFiles.computeIfPresent(path, (p, file) -> {
 			var lastModified = Optional.of(file.getLastModified());
 			var size = Optional.of(file.getSize());
-			return new CloudItemMetadata(path.getFileName().toString(), path, CloudItemType.FILE, lastModified, size);
+			result.set(new CloudItemMetadata(path.getFileName().toString(), path, CloudItemType.FILE, lastModified, size));
+			return file;
 		});
+		return Optional.ofNullable(result.get());
 	}
 
 }
