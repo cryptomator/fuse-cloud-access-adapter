@@ -112,6 +112,10 @@ class OpenFile implements Closeable {
 		return dirty && fc.isOpen();
 	}
 
+	public boolean isClosed() {
+		return !fc.isOpen();
+	}
+
 	public Instant getLastModified() {
 		return lastModified;
 	}
@@ -120,9 +124,9 @@ class OpenFile implements Closeable {
 		this.lastModified = newLastModified;
 	}
 
-	@Override
 	public synchronized void close() {
 		try {
+			LOG.info("Closing open file {}", path);
 			fc.close();
 		} catch (IOException e) {
 			LOG.error("Failed to close tmp file.", e);

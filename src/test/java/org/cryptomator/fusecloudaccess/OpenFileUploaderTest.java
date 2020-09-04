@@ -1,8 +1,11 @@
 package org.cryptomator.fusecloudaccess;
 
+import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.exceptions.CloudProviderException;
+import org.hamcrest.CoreMatchers;
+import org.hamcrest.MatcherAssert;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -16,29 +19,32 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Stream;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 
 public class OpenFileUploaderTest {
 
 	private CloudProvider provider;
+	private Path cacheDir;
+	private ExecutorService executorService;
+	private ConcurrentMap<CloudPath, Future<?>> tasks;
 	private OpenFileUploader uploader;
 	private OpenFile file;
-	private CloudPath path;
-
-	@TempDir
-	Path cacheDir;
 
 	@BeforeEach
 	public void setup() {
 		this.provider = Mockito.mock(CloudProvider.class);
-		this.uploader = new OpenFileUploader(provider, cacheDir);
+		this.cacheDir = Mockito.mock(Path.class);
+		this.executorService = Mockito.mock(ExecutorService.class);
+		this.tasks = Mockito.mock(ConcurrentMap.class);
+		this.uploader = new OpenFileUploader(provider, cacheDir, executorService, tasks);
 		this.file = Mockito.mock(OpenFile.class);
-		this.path = Mockito.mock(CloudPath.class, "/path/in/cloud");
-
-		var fileName = Mockito.mock(CloudPath.class, "cloud");
-		Mockito.when(file.getPath()).thenReturn(path);
-		Mockito.when(path.getFileName()).thenReturn(fileName);
-		Mockito.when(fileName.toString()).thenReturn("cloud");
 	}
 
 	@Test
@@ -46,163 +52,199 @@ public class OpenFileUploaderTest {
 	public void testUploadUnmodified() {
 		Mockito.when(file.isDirty()).thenReturn(false);
 
-		var futureResult = uploader.scheduleUpload(file);
-		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+		uploader.scheduleUpload(file, ignored -> {
+		});
 
-		Assertions.assertNull(result);
-		Mockito.verify(provider, Mockito.never()).write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.anyLong(), Mockito.any());
+		Mockito.verify(executorService, Mockito.never()).submit(Mockito.any(Runnable.class));
+		Mockito.verify(tasks, Mockito.never()).put(Mockito.any(), Mockito.any());
 	}
 
 	@Test
-	@DisplayName("wait for scheduled upload of modified file")
-	public void testUploadModified() throws IOException {
+	@DisplayName("scheduling modified file (no previous upload)")
+	public void testUploadModified() {
+		var cloudPath = Mockito.mock(CloudPath.class, "/path/in/cloud");
+		var task = Mockito.mock(Future.class);
 		Mockito.when(file.isDirty()).thenReturn(true);
-		Mockito.doAnswer(invocation -> {
-			Files.createFile(invocation.getArgument(0));
-			return null;
-		}).when(file).persistTo(Mockito.any());
-		Mockito.when(provider.write(Mockito.eq(path), Mockito.eq(true), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(null));
+		Mockito.when(file.getPath()).thenReturn(cloudPath);
+		Mockito.when(executorService.submit(Mockito.any(OpenFileUploader.ScheduledUpload.class))).thenReturn(task);
 
-		var futureResult = uploader.scheduleUpload(file);
-		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+		uploader.scheduleUpload(file, ignored -> {
+		});
 
-		Assertions.assertEquals(file.getPath(), result);
-		Mockito.verify(provider).write(Mockito.eq(path), Mockito.eq(true), Mockito.any(), Mockito.anyLong(), Mockito.any());
-		Mockito.verify(file).setDirty(false);
+		Mockito.verify(executorService).submit(Mockito.any(OpenFileUploader.ScheduledUpload.class));
+		Mockito.verify(tasks).put(cloudPath, task);
 	}
 
 	@Test
-	@DisplayName("Error during upload")
-	public void testFailingUpload() throws IOException {
-		var e = new CloudProviderException("fail.");
+	@DisplayName("scheduling modified file (cancel previous upload)")
+	public void testUploadModifiedAndCancelPrevious() {
+		var cloudPath = Mockito.mock(CloudPath.class, "/path/in/cloud");
+		var task = Mockito.mock(Future.class);
+		var previousTask = Mockito.mock(Future.class);
 		Mockito.when(file.isDirty()).thenReturn(true);
-		Mockito.doAnswer(invocation -> {
-			Files.createFile(invocation.getArgument(0));
-			return null;
-		}).when(file).persistTo(Mockito.any());
-		Mockito.when(provider.write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
+		Mockito.when(file.getPath()).thenReturn(cloudPath);
+		Mockito.when(executorService.submit(Mockito.any(OpenFileUploader.ScheduledUpload.class))).thenReturn(task);
+		Mockito.when(tasks.put(cloudPath, task)).thenReturn(previousTask);
 
-		var futureResult = uploader.scheduleUpload(file);
-		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+		uploader.scheduleUpload(file, ignored -> {
+		});
 
-		Assertions.assertEquals(file.getPath(), result);
-		Mockito.verify(file).setDirty(false);
-		Mockito.verify(file).setDirty(true);
+		Mockito.verify(executorService).submit(Mockito.any(OpenFileUploader.ScheduledUpload.class));
+		Mockito.verify(tasks).put(cloudPath, task);
+		Mockito.verify(previousTask).cancel(true);
 	}
 
 	@Test
-	@DisplayName("wait on 0 pending uploads")
-	public void testAwaitPendingUploadsWithEmptyQueue() {
-		var futureResult = uploader.awaitPendingUploads();
-		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+	@DisplayName("cancel pending upload")
+	public void testCancelExistingUpload() {
+		var cloudPath = Mockito.mock(CloudPath.class, "/path/in/cloud");
+		var task = Mockito.mock(Future.class);
+		Mockito.when(tasks.get(cloudPath)).thenReturn(task);
 
-		Assertions.assertNull(result);
+		var canceled = uploader.cancelUpload(cloudPath);
+
+		Assertions.assertTrue(canceled);
+		Mockito.verify(task).cancel(true);
 	}
 
 	@Test
-	@DisplayName("temp directory is cleared after failed upload")
-	public void testTempDirIsClearedOnFailure() throws IOException {
-		assert isEmptyDir(cacheDir);
+	@DisplayName("cancel non-existing upload")
+	public void testCancelNonexistingUpload() {
+		var cloudPath = Mockito.mock(CloudPath.class, "/path/in/cloud");
 
-		var e = new CloudProviderException("fail.");
-		Mockito.when(file.isDirty()).thenReturn(true);
-		Mockito.doAnswer(invocation -> {
-			Files.createFile(invocation.getArgument(0));
-			return null;
-		}).when(file).persistTo(Mockito.any());
-		Mockito.when(provider.write(Mockito.any(), Mockito.anyBoolean(), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
+		var canceled = uploader.cancelUpload(cloudPath);
 
-		var futureResult = uploader.scheduleUpload(file);
-		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
-
-		Assertions.assertEquals(file.getPath(), result);
-		Assertions.assertTrue(isEmptyDir(cacheDir));
-	}
-
-	@Test
-	@DisplayName("temp directory is cleared after successful upload")
-	public void testTempDirIsClearedOnSuccess() throws IOException {
-		assert isEmptyDir(cacheDir);
-
-		Mockito.when(file.isDirty()).thenReturn(true);
-		Mockito.doAnswer(invocation -> {
-			Files.createFile(invocation.getArgument(0));
-			return null;
-		}).when(file).persistTo(Mockito.any());
-		Mockito.when(provider.write(Mockito.eq(path), Mockito.eq(true), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(null));
-
-		var futureResult = uploader.scheduleUpload(file);
-		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
-
-		Assertions.assertEquals(file.getPath(), result);
-		Assertions.assertTrue(isEmptyDir(cacheDir));
-	}
-
-	private boolean isEmptyDir(Path dir) throws IOException {
-		try (Stream<Path> entries = Files.list(dir)) {
-			return !entries.findFirst().isPresent();
-		}
+		Assertions.assertFalse(canceled);
 	}
 
 	@Nested
-	@DisplayName("with two scheduled uploads ...")
-	public class WithScheduledUploads {
+	@DisplayName("awaitPendingUploads(...)")
+	public class Termination {
 
-		private CloudPath path1 = Mockito.mock(CloudPath.class, "/path/in/cloud/1");
-		private CloudPath path2 = Mockito.mock(CloudPath.class, "/path/in/cloud/2");
-		private CloudPath fileName1 = Mockito.mock(CloudPath.class, "1");
-		private CloudPath fileName2 = Mockito.mock(CloudPath.class, "2");
-		private OpenFile file1 = Mockito.mock(OpenFile.class);
-		private OpenFile file2 = Mockito.mock(OpenFile.class);
-		private CompletableFuture upload1 = new CompletableFuture();
-		private CompletableFuture upload2 = new CompletableFuture();
+		private ExecutorService executorService;
+		private OpenFileUploader uploader;
 
 		@BeforeEach
-		public void setup() throws IOException {
-			Mockito.when(path1.getFileName()).thenReturn(fileName1);
-			Mockito.when(path2.getFileName()).thenReturn(fileName2);
-			Mockito.when(fileName1.toString()).thenReturn("1");
-			Mockito.when(fileName2.toString()).thenReturn("2");
-			Mockito.when(file1.getPath()).thenReturn(path1);
-			Mockito.when(file2.getPath()).thenReturn(path2);
-			Mockito.when(file1.isDirty()).thenReturn(true);
-			Mockito.when(file2.isDirty()).thenReturn(true);
-			Mockito.doAnswer(invocation -> {
-				Files.createFile(invocation.getArgument(0));
-				return null;
-			}).when(file1).persistTo(Mockito.any());
-			Mockito.doAnswer(invocation -> {
-				Files.createFile(invocation.getArgument(0));
-				return null;
-			}).when(file2).persistTo(Mockito.any());
-			Mockito.when(provider.write(Mockito.eq(path1), Mockito.anyBoolean(), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(upload1);
-			Mockito.when(provider.write(Mockito.eq(path2), Mockito.anyBoolean(), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(upload2);
-			uploader.scheduleUpload(file1);
-			uploader.scheduleUpload(file2);
+		public void setup() {
+			this.executorService = Executors.newSingleThreadExecutor();
+			this.uploader = new OpenFileUploader(provider, cacheDir, executorService, tasks);
 		}
 
 		@Test
-		@DisplayName("wait for all")
+		@DisplayName("0 pending uploads")
+		public void testAwaitNoPendingUploads() {
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> {
+				uploader.awaitPendingUploads(1, TimeUnit.SECONDS);
+			});
+			Assertions.assertTrue(executorService.isTerminated());
+		}
+
+		@Test
+		@DisplayName("1 pending upload")
 		public void testAwaitPendingUploads() {
-			upload1.complete(null);
-			upload2.complete(null);
-
-			var futureResult = uploader.awaitPendingUploads();
-			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
-
-			Assertions.assertNull(result);
+			executorService.submit(() -> {
+			});
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> {
+				uploader.awaitPendingUploads(1, TimeUnit.SECONDS);
+			});
+			Assertions.assertTrue(executorService.isTerminated());
 		}
 
 		@Test
-		@DisplayName("wait for all, despite one failing")
-		public void waitForPendingUploadsWithOneFailing() {
-			upload1.complete(null);
-			upload2.completeExceptionally(new CloudProviderException("fail."));
+		@DisplayName("timeout")
+		public void testAwaitPendingUploads1() {
+			executorService.submit(() -> {
+				try {
+					Thread.sleep(100);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+				}
+			});
+			Assertions.assertThrows(TimeoutException.class, () -> {
+				Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> {
+					uploader.awaitPendingUploads(10, TimeUnit.MILLISECONDS);
+				});
+			});
+			Assertions.assertFalse(executorService.isTerminated());
+		}
 
-			var futureResult = uploader.awaitPendingUploads();
-			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+	}
 
-			Assertions.assertNull(result);
+	@Nested
+	public class ScheduledUploadTest {
+
+		private Path tmpDir;
+		CloudProvider provider;
+		OpenFile openFile;
+		Consumer<OpenFile> onSuccess;
+		private OpenFileUploader.ScheduledUpload upload;
+
+		@BeforeEach
+		public void setup(@TempDir Path tmpDir) {
+			this.tmpDir = tmpDir;
+			this.provider = Mockito.mock(CloudProvider.class);
+			this.openFile = Mockito.mock(OpenFile.class);
+			this.onSuccess = Mockito.mock(Consumer.class);
+			this.upload = new OpenFileUploader.ScheduledUpload(provider, openFile, onSuccess, tmpDir);
+		}
+
+		@Test
+		@DisplayName("upload fails due to I/O error during upload preparation")
+		public void testIOErrorDuringPersistTo() throws IOException {
+			var e = new IOException("fail");
+			Mockito.when(openFile.persistTo(Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
+
+			var thrown = Assertions.assertThrows(IOException.class, () -> {
+				upload.call();
+			});
+
+			MatcherAssert.assertThat(thrown.getCause(), CoreMatchers.instanceOf(ExecutionException.class));
+			Assertions.assertSame(e, thrown.getCause().getCause());
+			Mockito.verify(onSuccess, Mockito.never()).accept(Mockito.any());
+			Assertions.assertEquals(0l, Files.list(tmpDir).count());
+		}
+
+		@Test
+		@DisplayName("upload fails due to CloudProviderException during actual upload")
+		public void testCloudProviderExceptionDuringUpload() throws IOException {
+			var e = new CloudProviderException("fail");
+			var cloudPath = Mockito.mock(CloudPath.class, "/path/to/file");
+			Mockito.when(openFile.persistTo(Mockito.any())).thenAnswer(invocation -> {
+				Path path = invocation.getArgument(0);
+				Files.write(path, new byte[42]);
+				return CompletableFuture.completedFuture(null);
+			});
+			Mockito.when(openFile.getPath()).thenReturn(cloudPath);
+			Mockito.when(provider.write(Mockito.eq(cloudPath), Mockito.eq(true), Mockito.any(), Mockito.eq(42l), Mockito.any()))
+					.thenReturn(CompletableFuture.failedFuture(e));
+
+			var thrown = Assertions.assertThrows(IOException.class, () -> {
+				upload.call();
+			});
+
+			MatcherAssert.assertThat(thrown.getCause(), CoreMatchers.instanceOf(ExecutionException.class));
+			Assertions.assertSame(e, thrown.getCause().getCause());
+			Mockito.verify(onSuccess, Mockito.never()).accept(Mockito.any());
+			Assertions.assertEquals(0l, Files.list(tmpDir).count());
+		}
+
+		@Test
+		@DisplayName("upload succeeds")
+		public void testSuccessfulUpload() throws IOException {
+			var cloudPath = Mockito.mock(CloudPath.class, "/path/to/file");
+			Mockito.when(openFile.persistTo(Mockito.any())).thenAnswer(invocation -> {
+				Path path = invocation.getArgument(0);
+				Files.write(path, new byte[42]);
+				return CompletableFuture.completedFuture(null);
+			});
+			Mockito.when(openFile.getPath()).thenReturn(cloudPath);
+			Mockito.when(provider.write(Mockito.eq(cloudPath), Mockito.eq(true), Mockito.any(), Mockito.eq(42l), Mockito.any()))
+					.thenReturn(CompletableFuture.completedFuture(Mockito.mock(CloudItemMetadata.class)));
+
+			upload.call();
+
+			Mockito.verify(onSuccess).accept(openFile);
+			Assertions.assertEquals(0l, Files.list(tmpDir).count());
 		}
 
 	}

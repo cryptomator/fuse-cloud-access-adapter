@@ -64,7 +64,7 @@ public class OpenFileFactoryTest {
 		Assertions.assertFalse(openFileFactory.get(handle).isPresent());
 		Assertions.assertEquals(2, openFile.getOpenFileHandleCount().get());
 		Assertions.assertTrue(activeFiles.containsKey(PATH));
-		Mockito.verify(uploader, Mockito.never()).scheduleUpload(Mockito.any());
+		Mockito.verify(uploader, Mockito.never()).scheduleUpload(Mockito.any(), Mockito.any());
 	}
 
 	@Test
@@ -74,13 +74,12 @@ public class OpenFileFactoryTest {
 		Assumptions.assumeTrue(openFile.equals(openFileFactory.get(handle).get()));
 		Mockito.when(openFile.getPath()).thenReturn(PATH);
 		Mockito.when(openFile.getOpenFileHandleCount()).thenReturn(new AtomicInteger(1));
-		Mockito.when(uploader.scheduleUpload(openFile)).thenReturn(CompletableFuture.completedFuture(PATH));
 
 		openFileFactory.close(handle);
 
 		Assertions.assertEquals(0, openFile.getOpenFileHandleCount().get());
-		Assertions.assertFalse(activeFiles.containsKey(PATH));
-		Mockito.verify(uploader).scheduleUpload(openFile);
+		Assertions.assertTrue(activeFiles.containsKey(PATH));
+		Mockito.verify(uploader).scheduleUpload(Mockito.eq(openFile), Mockito.any());
 	}
 
 	@Test

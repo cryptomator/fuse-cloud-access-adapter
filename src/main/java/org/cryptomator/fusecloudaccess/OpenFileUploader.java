@@ -7,15 +7,20 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.InputStream;
+import java.io.InterruptedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 
 /**
  * Prepares and schedules upload of (possibly) changed files to the cloud.
@@ -27,77 +32,108 @@ class OpenFileUploader {
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFileUploader.class);
 
 	private final CloudProvider provider;
-	private final ConcurrentMap<CloudPath, CompletionStage<CloudPath>> scheduledUploads = new ConcurrentHashMap<>();
+	private final ConcurrentMap<CloudPath, Future<?>> tasks;
 	private final Path cacheDir;
+	private final ExecutorService executorService;
 
-	OpenFileUploader(CloudProvider provider, Path cacheDir) {
+	public OpenFileUploader(CloudProvider provider, Path cacheDir) {
+		this(provider, cacheDir, Executors.newSingleThreadExecutor(), new ConcurrentHashMap<>());
+	}
+
+	OpenFileUploader(CloudProvider provider, Path cacheDir, ExecutorService executorService, ConcurrentMap<CloudPath, Future<?>> tasks) {
 		this.provider = provider;
+		this.tasks = tasks;
 		this.cacheDir = cacheDir;
+		this.executorService = executorService;
 	}
 
 	/**
 	 * Schedules {@link OpenFile} to be uploaded to the set {@link CloudProvider} by first creating a temporary copy of
 	 * it and start the upload by reading from the copy.
-	 * <p>
-	 * This method relies on that the underlying files in the file system do not change during the complete copy.
-	 * Generally it is not considered harmful, if a file is during upload replaced by a new version, since this version is also scheduled for an upload.
 	 *
-	 * @param file OpenFile object with reference to a real file.
-	 * @return A void {@link CompletionStage} indicating when the upload operation is successful completed.
+	 * @param file      OpenFile object with reference to a real file
+	 * @param onSuccess Callback invoked after successful upload
 	 */
-	public CompletionStage<CloudPath> scheduleUpload(OpenFile file) {
+	public void scheduleUpload(OpenFile file, Consumer<OpenFile> onSuccess) {
 		if (!file.isDirty()) {
 			LOG.trace("Upload of {} skipped. Unmodified.", file.getPath());
-			return CompletableFuture.completedFuture(null);
+			return; // no-op
 		}
-		try {
-			//TODO: cancel previous uploads
-			Path toUpload = cacheDir.resolve(UUID.randomUUID() + ".tmp");
-			file.persistTo(toUpload);
-			file.setDirty(false);
-			var size = Files.size(toUpload);
-			var in = Files.newInputStream(toUpload, StandardOpenOption.DELETE_ON_CLOSE);
-			return scheduleUpload(file, in, size);
-		} catch (IOException e) {
-			LOG.error("Upload of " + file.getPath() + " failed.", e);
-			return CompletableFuture.failedFuture(e);
+		Consumer<OpenFile> decoratedOnSuccess = f -> {
+			tasks.remove(f.getPath());
+			onSuccess.accept(f);
+		};
+		var task = executorService.submit(new ScheduledUpload(provider, file, decoratedOnSuccess, cacheDir));
+		var previousTask = tasks.put(file.getPath(), task);
+		if (previousTask != null) {
+			previousTask.cancel(true);
 		}
 	}
 
-	private CompletionStage<CloudPath> scheduleUpload(OpenFile file, InputStream in, long size) {
-		var path = file.getPath();
-		LOG.debug("uploading {}...", path);
-		var task = provider.write(path, true, in, size, ProgressListener.NO_PROGRESS_AWARE)
-				.thenRun(() -> LOG.debug("uploaded successfully: {}", path))
-				.exceptionally(e -> {
-					LOG.error("Upload of " + path + " failed.", e);
-					// TODO copy file to some lost+found dir
-					file.setDirty(true); // might cause an additional upload
-					return null;
-				}).thenApply(ignored -> {
-					scheduledUploads.remove(path); //TODO: document it (behaviour)
-					try {
-						in.close();
-					} catch (IOException e) {
-						LOG.error("Unable to close channel to temporary file, will be closed on program exit.", e);
-					}
-					return path;
-				});
-		scheduledUploads.put(path, task);
-		return task;
-	}
-
-	// TODO: cancel does not close the input stream of the canceled job. CHANGE THIS FOR GODS SAKE!
-	public synchronized void cancel(CloudPath path) {
+	/**
+	 * Cancels a pending upload (if any). No-op otherwise.
+	 * @param path
+	 * @return <code>true</code> if a pending upload has been canceled, <code>false</code> otherwise
+	 */
+	public boolean cancelUpload(CloudPath path) {
 		LOG.trace("Cancel possible pending upload for {}", path);
-		var upload = scheduledUploads.get(path);
-		if (upload != null) {
-			upload.toCompletableFuture().cancel(true);
+		var task = tasks.get(path);
+		if (task != null) {
+			task.cancel(true);
+			LOG.debug("Cancelled pending upload for {}", path);
+			return true;
+		} else {
+			return false;
 		}
 	}
 
-	public CompletionStage<Void> awaitPendingUploads() {
-		return CompletableFuture.allOf(scheduledUploads.values().toArray(CompletableFuture[]::new));
+	public void awaitPendingUploads(long timeout, TimeUnit timeUnit) throws InterruptedException, TimeoutException {
+		executorService.shutdown();
+		if (!executorService.awaitTermination(timeout, timeUnit)) {
+			throw new TimeoutException("Uploads still running.");
+		}
+	}
+
+	static class ScheduledUpload implements Callable<Void> {
+
+		private final CloudProvider provider;
+		private final OpenFile openFile;
+		private final Consumer<OpenFile> onSuccess;
+		private final Path tmpDir;
+
+		public ScheduledUpload(CloudProvider provider, OpenFile openFile, Consumer<OpenFile> onSuccess, Path tmpDir) {
+			this.provider = provider;
+			this.openFile = openFile;
+			this.onSuccess = onSuccess;
+			this.tmpDir = tmpDir;
+		}
+
+		@Override
+		public Void call() throws IOException {
+			Path tmpFile = tmpDir.resolve(UUID.randomUUID() + ".tmp");
+			try {
+				openFile.persistTo(tmpFile).toCompletableFuture().get();
+				assert Files.exists(tmpFile);
+				var size = Files.size(tmpFile);
+				try (var in = Files.newInputStream(tmpFile)) {
+					provider.write(openFile.getPath(), true, in, size, ProgressListener.NO_PROGRESS_AWARE) //
+							.toCompletableFuture() //
+							.get();
+				}
+				onSuccess.accept(openFile);
+				return null;
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				throw new InterruptedIOException("Upload interrupted.");
+			} catch (ExecutionException e) {
+				LOG.error("Upload of " + openFile.getPath() + " failed.", e);
+				// TODO copy file to some lost+found dir
+				throw new IOException("Upload failed.", e);
+			} finally {
+				Files.deleteIfExists(tmpFile);
+			}
+		}
+
 	}
 
 }

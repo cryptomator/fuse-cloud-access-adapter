@@ -25,7 +25,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.mockito.MockingDetails;
 import org.mockito.Mockito;
 import ru.serce.jnrfuse.ErrorCodes;
 import ru.serce.jnrfuse.FuseFillDir;
@@ -37,7 +36,6 @@ import java.lang.reflect.InvocationTargetException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -591,7 +589,7 @@ public class CloudAccessFSTest {
 			var actualCode = cloudFs.rename(oldPath.toString(), newPath.toString());
 
 			Assertions.assertEquals(0, actualCode);
-			Mockito.verify(fileFactory).moved(oldPath, newPath);
+			Mockito.verify(fileFactory).move(oldPath, newPath);
 		}
 
 		@DisplayName("rename(...) returns ENOENT if cannot be found")

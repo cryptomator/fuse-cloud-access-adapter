@@ -1,6 +1,5 @@
 package org.cryptomator.fusecloudaccess;
 
-import com.google.common.io.ByteStreams;
 import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
@@ -27,11 +26,7 @@ import ru.serce.jnrfuse.struct.Statvfs;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.channels.Channels;
-import java.nio.channels.FileChannel;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.EnumSet;
 import java.util.concurrent.CompletableFuture;
@@ -292,7 +287,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			 PathLock newPathLock = lockManager.createPathLock(newpath).forWriting(); //
 			 DataLock newDataLock = newPathLock.lockDataForWriting()) {
 			var returnCode = renameInternal(CloudPath.of(oldpath), CloudPath.of(newpath));
-			LOG.trace("rename {} to {}", oldpath, newpath);
+			LOG.debug("rename {} to {}", oldpath, newpath);
 			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("rename() failed", e);
@@ -301,11 +296,9 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	private CompletionStage<Integer> renameInternal(CloudPath oldPath, CloudPath newPath) {
+		openFileFactory.move(oldPath, newPath);
 		return provider.move(oldPath, newPath, true) //
-				.thenApply(p -> {
-					openFileFactory.moved(oldPath, newPath);
-					return 0;
-				}) //
+				.thenApply(ignored -> 0) //
 				.exceptionally(e -> {
 					if (e instanceof NotFoundException) {
 						return -ErrorCodes.ENOENT();
@@ -429,11 +422,9 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	// visible for testing
 	CompletionStage<Integer> deleteInternal(CloudPath path) {
+		openFileFactory.delete(path);
 		return provider.delete(path) //
-				.thenApply(ignored -> {
-					openFileFactory.delete(path);
-					return 0;
-				}) //
+				.thenApply(ignored -> 0) //
 				.exceptionally(e -> {
 					if (e instanceof NotFoundException) {
 						return -ErrorCodes.ENOENT();
@@ -538,7 +529,19 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	public void umount() {
 		super.umount();
 		LOG.debug("Waiting for pending uploads...");
-		openFileUploader.awaitPendingUploads().toCompletableFuture().join();
-		LOG.debug("All done.");
+		try {
+			while (true) {
+				try {
+					openFileUploader.awaitPendingUploads(30, TimeUnit.SECONDS); // TODO make configurable
+					break;
+				} catch (TimeoutException e) {
+					LOG.info("Still uploading...");
+				}
+			}
+			LOG.debug("All done.");
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			LOG.error("Pending uploads interrupted.", e);
+		}
 	}
 }

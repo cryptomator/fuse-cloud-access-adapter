@@ -60,7 +60,7 @@ class OpenFileFactory {
 	public long open(CloudPath path, Set<OpenFlags> flags, long initialSize, Instant lastModified) throws IOException {
 		try {
 			if (flags.contains(OpenFlags.O_RDWR) || flags.contains(OpenFlags.O_WRONLY)) {
-				uploader.cancel(path);
+				uploader.cancelUpload(path);
 			}
 			var openFile = activeFiles.compute(path, (p, activeFile) -> {
 				OpenFile file;
@@ -110,19 +110,24 @@ class OpenFileFactory {
 	 * @param oldPath Path to a cached file before it has been moved
 	 * @param newPath New path which is used to access the cached file
 	 */
-	public synchronized void moved(CloudPath oldPath, CloudPath newPath) {
-		//uploader.cancel(oldPath);
-		//uploader.cancel(newPath);
-		var previouslyActiveFile = activeFiles.remove(newPath);
-		if (previouslyActiveFile != null) {
-			previouslyActiveFile.close();
-		}
+	public synchronized void move(CloudPath oldPath, CloudPath newPath) {
+		var wasUploading = uploader.cancelUpload(oldPath);
+		uploader.cancelUpload(newPath);
 		var activeFile = activeFiles.remove(oldPath);
+		activeFiles.compute(newPath, (p, previouslyActiveFile) -> {
+			if (previouslyActiveFile != null) {
+				previouslyActiveFile.close();
+			}
+			return activeFile;
+		});
 		if (activeFile != null) {
 			activeFile.updatePath(newPath);
 			activeFiles.put(newPath, activeFile);
-			//TODO: if an upload for oldPath already existed, we need to trigger a new one for new path
+			if (wasUploading) {
+				uploader.scheduleUpload(activeFile, this::onFinishedUpload);
+			}
 		}
+
 		cachedFiles.invalidate(newPath);
 		var cachedFile = cachedFiles.getIfPresent(oldPath);
 		if (cachedFile != null) {
@@ -141,7 +146,8 @@ class OpenFileFactory {
 	 * @param path Path to a cached file
 	 */
 	public void delete(CloudPath path) {
-		uploader.cancel(path); // TODO: how to cancel uploads?
+		// TODO what about descendants of path?
+		uploader.cancelUpload(path);
 		activeFiles.compute(path, (p, activeFile) -> {
 			OpenFile file;
 			if (activeFile != null) {
@@ -149,7 +155,9 @@ class OpenFileFactory {
 			} else if ((file = cachedFiles.getIfPresent(path)) != null) {
 				cachedFiles.invalidate(path);
 			}
-			file.close();
+			if (file != null) {
+				file.close();
+			}
 			return null; // removes entry from map
 		});
 	}
@@ -168,19 +176,28 @@ class OpenFileFactory {
 		var path = file.getPath();
 		activeFiles.computeIfPresent(path, (p, activeFile) -> {
 			if (activeFile.getOpenFileHandleCount().decrementAndGet() == 0) { // was this the last file handle?
-				uploader.scheduleUpload(activeFile).thenAccept(this::onFinishedUpload);
+				uploader.scheduleUpload(activeFile, this::onFinishedUpload);
 			}
 			return activeFile; // DO NOT remove the mapping yet! this will be done in #onFinishedUpload
 		});
 	}
 
-	private void onFinishedUpload(CloudPath path) {
-		activeFiles.compute(path, (p, activeFile) -> {
-			if (activeFile.getOpenFileHandleCount().get() == 0) { // hasn't the file been re-opened in the meantime?
-				cachedFiles.put(path, activeFile); // transition to cached state
+	/**
+	 * This is the _only_ place where a transition from ACTIVE to CACHED state is legitimate.
+	 *
+	 * @param file
+	 */
+	private void onFinishedUpload(OpenFile file) {
+		activeFiles.computeIfPresent(file.getPath(), (p, activeFile) -> {
+			if (activeFile.isClosed()) { // the file has been closed in the meantime, e.g. due to delete().
 				return null; // remove mapping
-			} else { // file has been reopened in the meantime
+			} else if (activeFile.getOpenFileHandleCount().get() > 0) { // file has been reopened
 				return activeFile; // keep the mapping
+			} else {
+				assert !activeFile.isClosed();
+				assert activeFile.getOpenFileHandleCount().get() == 0;
+				cachedFiles.put(file.getPath(), activeFile); // transition to cached state
+				return null; // remove mapping
 			}
 		});
 	}
