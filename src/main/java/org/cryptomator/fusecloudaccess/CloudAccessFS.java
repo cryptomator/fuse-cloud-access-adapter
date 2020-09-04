@@ -120,12 +120,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	private CompletionStage<Integer> getattrInternal(CloudPath path, FileStat stat) {
-		var cachedMetadata = openFileFactory.getCachedMetadata(path);
-		if (cachedMetadata.isPresent()) {
-			Attributes.copy(cachedMetadata.get(), stat);
-			return CompletableFuture.completedFuture(0);
-		}
-		return provider.itemMetadata(path) //
+		return getMetadataFromCacheOrCloud(path) //
 				.thenApply(metadata -> {
 					Attributes.copy(metadata, stat);
 					return 0;
@@ -138,6 +133,18 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 						return -ErrorCodes.EIO();
 					}
 				});
+	}
+
+	/**
+	 * Reads metadata. Prefers locally cached metadata and fetches metadata from the cloud as a fallback.
+ 	 * @param path
+	 * @return
+	 */
+	private CompletionStage<CloudItemMetadata> getMetadataFromCacheOrCloud(CloudPath path) {
+		return openFileFactory
+				.getCachedMetadata(path)
+				.<CompletionStage<CloudItemMetadata>>map(CompletableFuture::completedFuture)
+				.orElse(provider.itemMetadata(path));
 	}
 
 	@Override
@@ -154,7 +161,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	private CompletionStage<Integer> opendirInternal(CloudPath path, FuseFileInfo fi) {
-		return provider.itemMetadata(path) //
+		return getMetadataFromCacheOrCloud(path) //
 				.thenApply(metadata -> {
 					if (metadata.getItemType() == CloudItemType.FOLDER) {
 						long dirHandle = openDirFactory.open(path);
@@ -237,8 +244,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	private CompletionStage<Integer> openInternal(CloudPath path, FuseFileInfo fi) {
-		return provider.itemMetadata(path) //
-				.thenApply(metadata -> {
+		return getMetadataFromCacheOrCloud(path).thenApply(metadata -> {
 					final var type = metadata.getItemType();
 					if (type == CloudItemType.FILE) {
 						try {
@@ -287,7 +293,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			 PathLock newPathLock = lockManager.createPathLock(newpath).forWriting(); //
 			 DataLock newDataLock = newPathLock.lockDataForWriting()) {
 			var returnCode = renameInternal(CloudPath.of(oldpath), CloudPath.of(newpath));
-			LOG.debug("rename {} to {}", oldpath, newpath);
+			LOG.trace("rename {} to {}", oldpath, newpath);
 			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("rename() failed", e);

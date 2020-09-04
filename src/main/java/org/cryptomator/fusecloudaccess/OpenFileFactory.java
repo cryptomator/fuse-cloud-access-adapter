@@ -1,5 +1,6 @@
 package org.cryptomator.fusecloudaccess;
 
+import com.google.common.base.Preconditions;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.RemovalNotification;
@@ -30,9 +31,12 @@ class OpenFileFactory {
 	private static final AtomicLong FILE_HANDLE_GEN = new AtomicLong();
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFileFactory.class);
 
-	// activeFiles.compute is the primary barrier for synchronized access when creating/closing/moving OpenFiles
+	/*
+	 * activeFiles.compute is the primary barrier for synchronized access when creating/closing/moving OpenFiles
+	 * OpenFile.close() as well as modifications to OpenFile.getOpenFileHandleCount() MUST be protected by this
+	 * means of synchronization.
+	 */
 	private final ConcurrentMap<CloudPath, OpenFile> activeFiles;
-	private final Cache<CloudPath, OpenFile> cachedFiles;
 	private final Map<Long, OpenFile> fileHandles;
 	private final CloudProvider provider;
 	private final OpenFileUploader uploader;
@@ -45,7 +49,6 @@ class OpenFileFactory {
 	// visible for testing
 	OpenFileFactory(ConcurrentMap<CloudPath, OpenFile> activeFiles, CloudProvider provider, OpenFileUploader uploader, Path cacheDir) {
 		this.activeFiles = activeFiles;
-		this.cachedFiles = CacheBuilder.newBuilder().expireAfterWrite(10, TimeUnit.SECONDS).removalListener(this::removedFromCache).build();
 		this.fileHandles = new HashMap<>();
 		this.provider = provider;
 		this.uploader = uploader;
@@ -62,17 +65,12 @@ class OpenFileFactory {
 			if (flags.contains(OpenFlags.O_RDWR) || flags.contains(OpenFlags.O_WRONLY)) {
 				uploader.cancelUpload(path);
 			}
-			var openFile = activeFiles.compute(path, (p, activeFile) -> {
-				OpenFile file;
-				if (activeFile != null) { // 1. use active file (if present)
-					file = activeFile;
-				} else if ((file = cachedFiles.getIfPresent(p)) != null) { // 2. reactivate cached file (if present)
-					cachedFiles.invalidate(p);
-					file.setLastModified(lastModified);
-				} else { // 3. create new file
-					file = createOpenFile(p, initialSize, lastModified);
+			var openFile = activeFiles.compute(path, (p, file) -> {
+				if (file == null) {
+					file = createOpenFile(p, initialSize, lastModified); // TODO remove redundant lastModified?
 				}
 				file.getOpenFileHandleCount().incrementAndGet();
+				file.setLastModified(lastModified);
 				return file;
 			});
 			if (flags.contains(OpenFlags.O_TRUNC)) {
@@ -111,30 +109,23 @@ class OpenFileFactory {
 	 * @param newPath New path which is used to access the cached file
 	 */
 	public synchronized void move(CloudPath oldPath, CloudPath newPath) {
+		Preconditions.checkArgument(!oldPath.equals(newPath));
 		var wasUploading = uploader.cancelUpload(oldPath);
 		uploader.cancelUpload(newPath);
 		var activeFile = activeFiles.remove(oldPath);
 		activeFiles.compute(newPath, (p, previouslyActiveFile) -> {
+			assert previouslyActiveFile != activeFile;
 			if (previouslyActiveFile != null) {
 				previouslyActiveFile.close();
 			}
+			if (activeFile != null) {
+				activeFile.updatePath(newPath);
+				if (wasUploading) {
+					uploader.scheduleUpload(activeFile, this::onFinishedUpload);
+				}
+			}
 			return activeFile;
 		});
-		if (activeFile != null) {
-			activeFile.updatePath(newPath);
-			activeFiles.put(newPath, activeFile);
-			if (wasUploading) {
-				uploader.scheduleUpload(activeFile, this::onFinishedUpload);
-			}
-		}
-
-		cachedFiles.invalidate(newPath);
-		var cachedFile = cachedFiles.getIfPresent(oldPath);
-		if (cachedFile != null) {
-			cachedFiles.put(newPath, cachedFile);
-			cachedFile.updatePath(newPath);
-			cachedFiles.invalidate(oldPath);
-		}
 	}
 
 	/**
@@ -148,16 +139,8 @@ class OpenFileFactory {
 	public void delete(CloudPath path) {
 		// TODO what about descendants of path?
 		uploader.cancelUpload(path);
-		activeFiles.compute(path, (p, activeFile) -> {
-			OpenFile file;
-			if (activeFile != null) {
-				file = activeFile;
-			} else if ((file = cachedFiles.getIfPresent(path)) != null) {
-				cachedFiles.invalidate(path);
-			}
-			if (file != null) {
-				file.close();
-			}
+		activeFiles.computeIfPresent(path, (p, file) -> {
+			file.close();
 			return null; // removes entry from map
 		});
 	}
@@ -178,62 +161,34 @@ class OpenFileFactory {
 			if (activeFile.getOpenFileHandleCount().decrementAndGet() == 0) { // was this the last file handle?
 				uploader.scheduleUpload(activeFile, this::onFinishedUpload);
 			}
-			return activeFile; // DO NOT remove the mapping yet! this will be done in #onFinishedUpload
+			return activeFile; // DO NOT remove the mapping yet! this might be done in #onFinishedUpload
 		});
 	}
 
-	/**
-	 * This is the _only_ place where a transition from ACTIVE to CACHED state is legitimate.
-	 *
-	 * @param file
-	 */
 	private void onFinishedUpload(OpenFile file) {
+		// TODO wait 10s before removing from activeFiles:
 		activeFiles.computeIfPresent(file.getPath(), (p, activeFile) -> {
-			if (activeFile.isClosed()) { // the file has been closed in the meantime, e.g. due to delete().
-				return null; // remove mapping
-			} else if (activeFile.getOpenFileHandleCount().get() > 0) { // file has been reopened
+			if (activeFile.getOpenFileHandleCount().get() > 0) { // file has been reopened
 				return activeFile; // keep the mapping
 			} else {
-				assert !activeFile.isClosed();
-				assert activeFile.getOpenFileHandleCount().get() == 0;
-				cachedFiles.put(file.getPath(), activeFile); // transition to cached state
+				activeFile.close();
 				return null; // remove mapping
 			}
 		});
-	}
-
-	private void removedFromCache(RemovalNotification<CloudPath, OpenFile> removalNotification) {
-		// manual removal may occur inside this class
-		// we must not close the openFile unless it was removed due to automatic cache eviction
-		if (removalNotification.wasEvicted()) {
-			var openFile = removalNotification.getValue();
-			LOG.info("clean up cached file {}", openFile.getPath());
-			openFile.close();
-		}
 	}
 
 	/**
 	 * Returns metadata from cache. This is not threadsafe and the returned metadata might refer to an
 	 * file that got evicted just in this moment.
 	 * @param path
-	 * @return OpenFile from either {@link #activeFiles} or {@link #cachedFiles}
+	 * @return Optional metadata, which is present if cached
 	 */
 	public Optional<CloudItemMetadata> getCachedMetadata(CloudPath path) {
-		return getCachedFile(path).map(file -> {
+		return Optional.ofNullable(activeFiles.get(path)).map(file -> {
 			var lastModified = Optional.of(file.getLastModified());
 			var size = Optional.of(file.getSize());
 			return new CloudItemMetadata(path.getFileName().toString(), path, CloudItemType.FILE, lastModified, size);
 		});
-	}
-
-	// visible for testing - do not use outside of #getCachedMetadata
-	Optional<OpenFile> getCachedFile(CloudPath path) {
-		var file = activeFiles.get(path);
-		if (file != null) {
-			return Optional.of(file);
-		} else {
-			return Optional.ofNullable(cachedFiles.getIfPresent(path));
-		}
 	}
 
 }

@@ -104,12 +104,10 @@ public class OpenFileFactoryTest {
 	@DisplayName("getCachedMetadata()")
 	@Test
 	public void testGetCachedMetadata() {
-		var openFileFactorySpy = Mockito.spy(openFileFactory);
-		Mockito.doReturn(Optional.of(openFile)).when(openFileFactorySpy).getCachedFile(PATH);
 		Mockito.when(openFile.getLastModified()).thenReturn(Instant.EPOCH);
 		Mockito.when(openFile.getSize()).thenReturn(42l);
 
-		var metadata = openFileFactorySpy.getCachedMetadata(PATH);
+		var metadata = openFileFactory.getCachedMetadata(PATH);
 
 		Assertions.assertEquals(PATH, metadata.get().getPath());
 		Assertions.assertEquals(PATH.getFileName().toString(), metadata.get().getName());

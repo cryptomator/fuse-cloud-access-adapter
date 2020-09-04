@@ -93,7 +93,7 @@ class OpenFile implements Closeable {
 	 * @return The current size of the cached file.
 	 */
 	public long getSize() {
-		Preconditions.checkState(fc.isOpen());
+		Preconditions.checkState(fc.isOpen(), "fc not open for " + path);
 		try {
 			return fc.size();
 		} catch (IOException e) {
@@ -101,19 +101,12 @@ class OpenFile implements Closeable {
 		}
 	}
 
-	void setDirty(boolean dirty) {
+	private void setDirty(boolean dirty) {
 		this.dirty = dirty;
-		if (dirty) {
-			this.lastModified = Instant.now();
-		}
 	}
 
-	boolean isDirty() {
-		return dirty && fc.isOpen();
-	}
-
-	public boolean isClosed() {
-		return !fc.isOpen();
+	public boolean isDirty() {
+		return dirty;
 	}
 
 	public Instant getLastModified() {
@@ -182,6 +175,7 @@ class OpenFile implements Closeable {
 		Preconditions.checkState(fc.isOpen());
 		assert size < Integer.MAX_VALUE; // technically an unsigned integer in the c header file
 		setDirty(true);
+		setLastModified(Instant.now());
 		markPopulatedIfGrowing(offset);
 		long pos = offset;
 		while (pos < offset + size) {
@@ -285,11 +279,13 @@ class OpenFile implements Closeable {
 		if (size < fc.size()) {
 			fc.truncate(size);
 			setDirty(true);
+			setLastModified(Instant.now());
 		} else if (size > fc.size()) {
 			assert size > 0;
 			markPopulatedIfGrowing(size);
 			fc.write(ByteBuffer.allocateDirect(1), size - 1);
 			setDirty(true);
+			setLastModified(Instant.now());
 		} else {
 			assert size == fc.size();
 			// no-op
