@@ -6,8 +6,6 @@ import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
 import com.google.common.collect.TreeRangeSet;
 import jnr.ffi.Pointer;
-import org.cryptomator.cloudaccess.api.CloudItemMetadata;
-import org.cryptomator.cloudaccess.api.CloudItemType;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
@@ -42,7 +40,7 @@ class OpenFile implements Closeable {
 	private final FileChannel fc;
 	private final CloudProvider provider;
 	private final RangeSet<Long> populatedRanges;
-	private final AtomicInteger openFileHandles;
+	private final AtomicInteger openFileHandleCount;
 	private CloudPath path;
 	private Instant lastModified;
 	private boolean dirty;
@@ -53,7 +51,7 @@ class OpenFile implements Closeable {
 		this.fc = fc;
 		this.provider = provider;
 		this.populatedRanges = populatedRanges;
-		this.openFileHandles = new AtomicInteger();
+		this.openFileHandleCount = new AtomicInteger();
 		this.lastModified = initialLastModified;
 	}
 
@@ -80,6 +78,10 @@ class OpenFile implements Closeable {
 		return path;
 	}
 
+	AtomicInteger getOpenFileHandleCount() {
+		return openFileHandleCount;
+	}
+
 	public void updatePath(CloudPath newPath) {
 		this.path = newPath;
 	}
@@ -97,14 +99,6 @@ class OpenFile implements Closeable {
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}
-	}
-
-	public int opened() {
-		return openFileHandles.incrementAndGet();
-	}
-
-	public int released() {
-		return openFileHandles.decrementAndGet();
 	}
 
 	void setDirty(boolean dirty) {

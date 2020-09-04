@@ -18,12 +18,16 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class OpenFileFactoryTest {
 
 	private static final CloudPath PATH = CloudPath.of("this/is/a/path");
 	private static final Set<OpenFlags> OPEN_FLAGS = Set.of(OpenFlags.O_RDONLY);
 
+	private ConcurrentMap<CloudPath, OpenFile> activeFiles = new ConcurrentHashMap<>();
 	private CloudProvider provider = Mockito.mock(CloudProvider.class);
 	private OpenFileUploader uploader = Mockito.mock(OpenFileUploader.class);
 	private OpenFileFactory openFileFactory;
@@ -31,9 +35,10 @@ public class OpenFileFactoryTest {
 
 	@BeforeEach
 	public void setup(@TempDir Path tmpDir) {
-		openFileFactory = Mockito.spy(new OpenFileFactory(provider, uploader, tmpDir));
+		openFileFactory = new OpenFileFactory(activeFiles, provider, uploader, tmpDir);
 		openFile = Mockito.mock(OpenFile.class);
-		Mockito.doReturn(openFile).when(openFileFactory).createOpenFile(Mockito.any(), Mockito.anyLong(), Mockito.any());
+		activeFiles.put(PATH, openFile);
+		Mockito.when(openFile.getOpenFileHandleCount()).thenReturn(new AtomicInteger(0));
 	}
 
 	@Test
@@ -41,8 +46,9 @@ public class OpenFileFactoryTest {
 	public void testAfterOpenTheOpenFileIsPresent() throws IOException {
 		var handle = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 
-		var sameHandle = openFileFactory.get(handle);
-		Assertions.assertTrue(sameHandle.isPresent());
+		var file = openFileFactory.get(handle);
+
+		Assertions.assertTrue(file.isPresent());
 	}
 
 	@Test
@@ -50,13 +56,15 @@ public class OpenFileFactoryTest {
 	public void testClosingReleasesHandle() throws IOException {
 		var handle = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 		Assumptions.assumeTrue(openFileFactory.get(handle).isPresent());
-		Mockito.when(openFile.getPath()).thenReturn(Mockito.mock(CloudPath.class));
-		Mockito.when(openFile.released()).thenReturn(3);
+		Mockito.when(openFile.getPath()).thenReturn(PATH);
+		Mockito.when(openFile.getOpenFileHandleCount()).thenReturn(new AtomicInteger(3));
 
 		openFileFactory.close(handle);
 
-		Mockito.verify(uploader, Mockito.never()).scheduleUpload(Mockito.any());
 		Assertions.assertFalse(openFileFactory.get(handle).isPresent());
+		Assertions.assertEquals(2, openFile.getOpenFileHandleCount().get());
+		Assertions.assertTrue(activeFiles.containsKey(PATH));
+		Mockito.verify(uploader, Mockito.never()).scheduleUpload(Mockito.any());
 	}
 
 	@Test
@@ -65,10 +73,13 @@ public class OpenFileFactoryTest {
 		var handle = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 		Assumptions.assumeTrue(openFile.equals(openFileFactory.get(handle).get()));
 		Mockito.when(openFile.getPath()).thenReturn(PATH);
-		Mockito.when(openFile.released()).thenReturn(0);
+		Mockito.when(openFile.getOpenFileHandleCount()).thenReturn(new AtomicInteger(1));
 		Mockito.when(uploader.scheduleUpload(openFile)).thenReturn(CompletableFuture.completedFuture(PATH));
 
 		openFileFactory.close(handle);
+
+		Assertions.assertEquals(0, openFile.getOpenFileHandleCount().get());
+		Assertions.assertFalse(activeFiles.containsKey(PATH));
 		Mockito.verify(uploader).scheduleUpload(openFile);
 	}
 
@@ -87,17 +98,19 @@ public class OpenFileFactoryTest {
 		var handle2 = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 
 		Assertions.assertNotEquals(handle1, handle2);
+		Assertions.assertEquals(2, openFile.getOpenFileHandleCount().get());
 	}
 
 
 	@DisplayName("getCachedMetadata()")
 	@Test
 	public void testGetCachedMetadata() {
-		Mockito.doReturn(Optional.of(openFile)).when(openFileFactory).getCachedFile(PATH);
+		var openFileFactorySpy = Mockito.spy(openFileFactory);
+		Mockito.doReturn(Optional.of(openFile)).when(openFileFactorySpy).getCachedFile(PATH);
 		Mockito.when(openFile.getLastModified()).thenReturn(Instant.EPOCH);
 		Mockito.when(openFile.getSize()).thenReturn(42l);
 
-		var metadata = openFileFactory.getCachedMetadata(PATH);
+		var metadata = openFileFactorySpy.getCachedMetadata(PATH);
 
 		Assertions.assertEquals(PATH, metadata.get().getPath());
 		Assertions.assertEquals(PATH.getFileName().toString(), metadata.get().getName());
