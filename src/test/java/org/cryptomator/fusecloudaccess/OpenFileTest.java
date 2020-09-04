@@ -5,12 +5,9 @@ import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
 import com.google.common.collect.TreeRangeSet;
 import jnr.ffi.Pointer;
-import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.exceptions.CloudProviderException;
-import org.hamcrest.CoreMatchers;
-import org.hamcrest.MatcherAssert;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
@@ -260,12 +257,9 @@ public class OpenFileTest {
 		public void testLoadFailsAfterEof(long offset) throws IOException {
 			Mockito.when(fileChannel.size()).thenReturn(100l);
 
-			var futureResult = fileSpy.load(offset, 10);
-			var thrown = Assertions.assertThrows(ExecutionException.class, () -> futureResult.toCompletableFuture().get());
+			Assertions.assertThrows(IllegalArgumentException.class, () -> fileSpy.load(offset, 10));
 
 			Mockito.verify(fileSpy, Mockito.never()).mergeData(Mockito.any(), Mockito.any());
-			Assertions.assertTrue(futureResult.toCompletableFuture().isCompletedExceptionally());
-			MatcherAssert.assertThat(thrown.getCause(), CoreMatchers.instanceOf(IllegalArgumentException.class));
 		}
 
 		@Test
