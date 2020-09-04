@@ -27,7 +27,6 @@ import java.nio.channels.WritableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -119,19 +118,12 @@ class OpenFile implements Closeable {
 		return dirty && fc.isOpen();
 	}
 
-	@Deprecated
-	void updateLastModified(Instant newLastModified) {
-		this.lastModified = newLastModified;
+	public Instant getLastModified() {
+		return lastModified;
 	}
 
-	@Deprecated
-	CloudItemMetadata getMetadata() {
-		Preconditions.checkState(fc.isOpen());
-		try {
-			return new CloudItemMetadata(path.getFileName().toString(), path, CloudItemType.FILE, Optional.of(lastModified), Optional.of(fc.size()));
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
-		}
+	public void setLastModified(Instant newLastModified) {
+		this.lastModified = newLastModified;
 	}
 
 	@Override

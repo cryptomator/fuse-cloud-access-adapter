@@ -1,6 +1,7 @@
 package org.cryptomator.fusecloudaccess;
 
 import jnr.constants.platform.OpenFlags;
+import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.junit.jupiter.api.Assertions;
@@ -14,6 +15,7 @@ import org.mockito.Mockito;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
@@ -85,6 +87,22 @@ public class OpenFileFactoryTest {
 		var handle2 = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 
 		Assertions.assertNotEquals(handle1, handle2);
+	}
+
+
+	@DisplayName("getCachedMetadata()")
+	@Test
+	public void testGetCachedMetadata() {
+		Mockito.doReturn(Optional.of(openFile)).when(openFileFactory).getCachedFile(PATH);
+		Mockito.when(openFile.getLastModified()).thenReturn(Instant.EPOCH);
+		Mockito.when(openFile.getSize()).thenReturn(42l);
+
+		var metadata = openFileFactory.getCachedMetadata(PATH);
+
+		Assertions.assertEquals(PATH, metadata.get().getPath());
+		Assertions.assertEquals(PATH.getFileName().toString(), metadata.get().getName());
+		Assertions.assertEquals(Instant.EPOCH, metadata.get().getLastModifiedDate().get());
+		Assertions.assertEquals(42l, metadata.get().getSize().get());
 	}
 
 }

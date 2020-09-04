@@ -5,6 +5,7 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.RemovalNotification;
 import jnr.constants.platform.OpenFlags;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
+import org.cryptomator.cloudaccess.api.CloudItemType;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.slf4j.Logger;
@@ -181,8 +182,28 @@ class OpenFileFactory {
 		}
 	}
 
-	// TODO: is there a cleaner way to access cached metadata?
-	Optional<CloudItemMetadata> getCachedMetadata(CloudPath path) {
-		return Optional.ofNullable(activeFiles.get(path)).map(OpenFile::getMetadata);
+	/**
+	 * Returns metadata from cache. This is not threadsafe and the returned metadata might refer to an
+	 * file that got evicted just in this moment.
+	 * @param path
+	 * @return OpenFile from either {@link #activeFiles} or {@link #cachedFiles}
+	 */
+	public Optional<CloudItemMetadata> getCachedMetadata(CloudPath path) {
+		return getCachedFile(path).map(file -> {
+			var lastModified = Optional.of(file.getLastModified());
+			var size = Optional.of(file.getSize());
+			return new CloudItemMetadata(path.getFileName().toString(), path, CloudItemType.FILE, lastModified, size);
+		});
 	}
+
+	// visible for testing - do not use outside of #getCachedMetadata
+	Optional<OpenFile> getCachedFile(CloudPath path) {
+		var file = activeFiles.get(path);
+		if (file != null) {
+			return Optional.of(file);
+		} else {
+			return Optional.ofNullable(cachedFiles.getIfPresent(path));
+		}
+	}
+
 }

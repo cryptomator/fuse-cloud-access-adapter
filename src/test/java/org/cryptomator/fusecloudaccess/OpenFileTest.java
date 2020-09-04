@@ -8,7 +8,6 @@ import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
-import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.cryptomator.cloudaccess.api.exceptions.CloudProviderException;
 import org.hamcrest.CoreMatchers;
 import org.hamcrest.MatcherAssert;
@@ -21,13 +20,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
 import org.mockito.Mockito;
-import org.mockito.internal.junit.MockitoTestListener;
 
-import java.awt.*;
-import java.io.ByteArrayInputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -38,11 +32,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 
 public class OpenFileTest {
@@ -402,26 +394,6 @@ public class OpenFileTest {
 			Assertions.assertFalse(openFile.isDirty());
 		}
 
-	}
-
-	@DisplayName("getMetadata()")
-	@Test
-	public void testGetMetadata() throws IOException {
-		Instant i = Instant.now();
-		CloudPath p = Mockito.mock(CloudPath.class);
-		CloudPath n = Mockito.mock(CloudPath.class);
-		Mockito.when(p.getFileName()).thenReturn(n);
-		Mockito.when(n.toString()).thenReturn("ukulele");
-		Mockito.when(fileChannel.size()).thenReturn(100l);
-		openFile.updatePath(p);
-		openFile.updateLastModified(i);
-
-		CloudItemMetadata data = openFile.getMetadata();
-
-		Assertions.assertEquals(i, data.getLastModifiedDate().get());
-		Assertions.assertEquals("ukulele", data.getName());
-		Assertions.assertEquals(p, data.getPath());
-		Assertions.assertEquals(100l, data.getSize().get());
 	}
 
 	@Nested
