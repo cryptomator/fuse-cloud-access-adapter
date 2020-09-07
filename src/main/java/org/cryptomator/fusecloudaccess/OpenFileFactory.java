@@ -1,9 +1,6 @@
 package org.cryptomator.fusecloudaccess;
 
 import com.google.common.base.Preconditions;
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.RemovalNotification;
 import jnr.constants.platform.OpenFlags;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudItemType;
@@ -23,7 +20,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -168,6 +164,12 @@ class OpenFileFactory {
 
 	private void onFinishedUpload(OpenFile file) {
 		// TODO wait 10s before removing from activeFiles:
+		// FIXME this is not how we want the 10s to work:
+		try {
+			Thread.sleep(10000);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
 		activeFiles.computeIfPresent(file.getPath(), (p, activeFile) -> {
 			if (activeFile.getOpenFileHandleCount().get() > 0) { // file has been reopened
 				return activeFile; // keep the mapping
