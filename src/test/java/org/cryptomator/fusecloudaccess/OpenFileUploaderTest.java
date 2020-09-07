@@ -91,7 +91,7 @@ public class OpenFileUploaderTest {
 
 		Mockito.verify(executorService).submit(Mockito.any(OpenFileUploader.ScheduledUpload.class));
 		Mockito.verify(tasks).put(cloudPath, task);
-		Mockito.verify(previousTask).cancel(true);
+		Mockito.verify(previousTask).cancel(false);
 	}
 
 	@Test
@@ -104,7 +104,7 @@ public class OpenFileUploaderTest {
 		var canceled = uploader.cancelUpload(cloudPath);
 
 		Assertions.assertTrue(canceled);
-		Mockito.verify(task).cancel(true);
+		Mockito.verify(task).cancel(false);
 	}
 
 	@Test
