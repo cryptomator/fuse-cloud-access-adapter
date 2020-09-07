@@ -1,9 +1,6 @@
 package org.cryptomator.fusecloudaccess;
 
 import com.google.common.base.Preconditions;
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.RemovalNotification;
 import jnr.constants.platform.OpenFlags;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudItemType;
@@ -23,6 +20,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -31,6 +30,7 @@ class OpenFileFactory {
 
 	private static final AtomicLong FILE_HANDLE_GEN = new AtomicLong();
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFileFactory.class);
+	private static final int KEEP_IDLE_FILE_SECONDS = 10;
 
 	/*
 	 * activeFiles.compute is the primary barrier for synchronized access when creating/closing/moving OpenFiles
@@ -42,18 +42,20 @@ class OpenFileFactory {
 	private final CloudProvider provider;
 	private final OpenFileUploader uploader;
 	private final Path cacheDir;
+	private final ScheduledExecutorService scheduler;
 
 	public OpenFileFactory(CloudProvider provider, OpenFileUploader uploader, Path cacheDir) {
-		this(new ConcurrentHashMap<>(), provider, uploader, cacheDir);
+		this(new ConcurrentHashMap<>(), provider, uploader, cacheDir, Executors.newSingleThreadScheduledExecutor());
 	}
 
 	// visible for testing
-	OpenFileFactory(ConcurrentMap<CloudPath, OpenFile> activeFiles, CloudProvider provider, OpenFileUploader uploader, Path cacheDir) {
+	OpenFileFactory(ConcurrentMap<CloudPath, OpenFile> activeFiles, CloudProvider provider, OpenFileUploader uploader, Path cacheDir, ScheduledExecutorService scheduler) {
 		this.activeFiles = activeFiles;
 		this.fileHandles = new HashMap<>();
 		this.provider = provider;
 		this.uploader = uploader;
 		this.cacheDir = cacheDir;
+		this.scheduler = scheduler;
 	}
 
 	/**
@@ -167,11 +169,15 @@ class OpenFileFactory {
 	}
 
 	private void onFinishedUpload(OpenFile file) {
-		// TODO wait 10s before removing from activeFiles:
-		activeFiles.computeIfPresent(file.getPath(), (p, activeFile) -> {
+		scheduler.schedule(() -> closeFileIfIdle(file.getPath()), KEEP_IDLE_FILE_SECONDS, TimeUnit.SECONDS);
+	}
+
+	private void closeFileIfIdle(CloudPath path) {
+		activeFiles.computeIfPresent(path, (p, activeFile) -> {
 			if (activeFile.getOpenFileHandleCount().get() > 0) { // file has been reopened
 				return activeFile; // keep the mapping
 			} else {
+				LOG.info("closing idle file {}", path);
 				activeFile.close();
 				return null; // remove mapping
 			}

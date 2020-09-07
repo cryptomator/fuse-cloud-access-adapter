@@ -52,19 +52,19 @@ class OpenFileUploader {
 	 * it and start the upload by reading from the copy.
 	 *
 	 * @param file      OpenFile object with reference to a real file
-	 * @param onSuccess Callback invoked after successful upload
+	 * @param onFinished Callback invoked after successful upload
 	 */
-	public void scheduleUpload(OpenFile file, Consumer<OpenFile> onSuccess) {
+	public void scheduleUpload(OpenFile file, Consumer<OpenFile> onFinished) {
 		if (!file.isDirty()) {
 			LOG.trace("Upload of {} skipped. Unmodified.", file.getPath());
-			onSuccess.accept(file);
+			onFinished.accept(file);
 			return; // no-op
 		}
-		Consumer<OpenFile> decoratedOnSuccess = f -> {
+		Consumer<OpenFile> decoratedOnFinished = f -> {
 			tasks.remove(f.getPath());
-			onSuccess.accept(f);
+			onFinished.accept(f);
 		};
-		var task = executorService.submit(new ScheduledUpload(provider, file, decoratedOnSuccess, cacheDir));
+		var task = executorService.submit(new ScheduledUpload(provider, file, decoratedOnFinished, cacheDir));
 		var previousTask = tasks.put(file.getPath(), task);
 		if (previousTask != null) {
 			previousTask.cancel(true);
@@ -99,13 +99,13 @@ class OpenFileUploader {
 
 		private final CloudProvider provider;
 		private final OpenFile openFile;
-		private final Consumer<OpenFile> onSuccess;
+		private final Consumer<OpenFile> onFinished;
 		private final Path tmpDir;
 
-		public ScheduledUpload(CloudProvider provider, OpenFile openFile, Consumer<OpenFile> onSuccess, Path tmpDir) {
+		public ScheduledUpload(CloudProvider provider, OpenFile openFile, Consumer<OpenFile> onFinished, Path tmpDir) {
 			this.provider = provider;
 			this.openFile = openFile;
-			this.onSuccess = onSuccess;
+			this.onFinished = onFinished;
 			this.tmpDir = tmpDir;
 		}
 
@@ -121,7 +121,6 @@ class OpenFileUploader {
 							.toCompletableFuture() //
 							.get();
 				}
-				onSuccess.accept(openFile);
 				return null;
 			} catch (InterruptedException e) {
 				Thread.currentThread().interrupt();
@@ -132,6 +131,7 @@ class OpenFileUploader {
 				throw new IOException("Upload failed.", e);
 			} finally {
 				Files.deleteIfExists(tmpFile);
+				onFinished.accept(openFile);
 			}
 		}
 

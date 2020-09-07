@@ -176,7 +176,7 @@ public class OpenFileUploaderTest {
 		private Path tmpDir;
 		CloudProvider provider;
 		OpenFile openFile;
-		Consumer<OpenFile> onSuccess;
+		Consumer<OpenFile> onFinished;
 		private OpenFileUploader.ScheduledUpload upload;
 
 		@BeforeEach
@@ -184,8 +184,8 @@ public class OpenFileUploaderTest {
 			this.tmpDir = tmpDir;
 			this.provider = Mockito.mock(CloudProvider.class);
 			this.openFile = Mockito.mock(OpenFile.class);
-			this.onSuccess = Mockito.mock(Consumer.class);
-			this.upload = new OpenFileUploader.ScheduledUpload(provider, openFile, onSuccess, tmpDir);
+			this.onFinished = Mockito.mock(Consumer.class);
+			this.upload = new OpenFileUploader.ScheduledUpload(provider, openFile, onFinished, tmpDir);
 		}
 
 		@Test
@@ -200,7 +200,7 @@ public class OpenFileUploaderTest {
 
 			MatcherAssert.assertThat(thrown.getCause(), CoreMatchers.instanceOf(ExecutionException.class));
 			Assertions.assertSame(e, thrown.getCause().getCause());
-			Mockito.verify(onSuccess, Mockito.never()).accept(Mockito.any());
+			Mockito.verify(onFinished).accept(Mockito.any());
 			Assertions.assertEquals(0l, Files.list(tmpDir).count());
 		}
 
@@ -224,7 +224,7 @@ public class OpenFileUploaderTest {
 
 			MatcherAssert.assertThat(thrown.getCause(), CoreMatchers.instanceOf(ExecutionException.class));
 			Assertions.assertSame(e, thrown.getCause().getCause());
-			Mockito.verify(onSuccess, Mockito.never()).accept(Mockito.any());
+			Mockito.verify(onFinished).accept(Mockito.any());
 			Assertions.assertEquals(0l, Files.list(tmpDir).count());
 		}
 
@@ -243,7 +243,7 @@ public class OpenFileUploaderTest {
 
 			upload.call();
 
-			Mockito.verify(onSuccess).accept(openFile);
+			Mockito.verify(onFinished).accept(openFile);
 			Assertions.assertEquals(0l, Files.list(tmpDir).count());
 		}
 

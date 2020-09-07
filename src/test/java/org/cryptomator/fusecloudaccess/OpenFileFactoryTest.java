@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class OpenFileFactoryTest {
@@ -27,12 +28,13 @@ public class OpenFileFactoryTest {
 	private ConcurrentMap<CloudPath, OpenFile> activeFiles = new ConcurrentHashMap<>();
 	private CloudProvider provider = Mockito.mock(CloudProvider.class);
 	private OpenFileUploader uploader = Mockito.mock(OpenFileUploader.class);
+	private ScheduledExecutorService scheduler = Mockito.mock(ScheduledExecutorService.class);
 	private OpenFileFactory openFileFactory;
 	private OpenFile openFile;
 
 	@BeforeEach
 	public void setup(@TempDir Path tmpDir) {
-		openFileFactory = new OpenFileFactory(activeFiles, provider, uploader, tmpDir);
+		openFileFactory = new OpenFileFactory(activeFiles, provider, uploader, tmpDir, scheduler);
 		openFile = Mockito.mock(OpenFile.class);
 		activeFiles.put(PATH, openFile);
 		Mockito.when(openFile.getOpenFileHandleCount()).thenReturn(new AtomicInteger(0));
