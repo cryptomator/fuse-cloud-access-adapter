@@ -67,7 +67,7 @@ class OpenFileUploader {
 		var task = executorService.submit(new ScheduledUpload(provider, file, decoratedOnSuccess, cacheDir));
 		var previousTask = tasks.put(file.getPath(), task);
 		if (previousTask != null) {
-			previousTask.cancel(true);
+			previousTask.cancel(false);
 		}
 	}
 
@@ -80,7 +80,7 @@ class OpenFileUploader {
 		LOG.trace("Cancel possible pending upload for {}", path);
 		var task = tasks.get(path);
 		if (task != null) {
-			task.cancel(true);
+			task.cancel(false);
 			LOG.debug("Cancelled pending upload for {}", path);
 			return true;
 		} else {
