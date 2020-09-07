@@ -57,6 +57,7 @@ class OpenFileUploader {
 	public void scheduleUpload(OpenFile file, Consumer<OpenFile> onSuccess) {
 		if (!file.isDirty()) {
 			LOG.trace("Upload of {} skipped. Unmodified.", file.getPath());
+			onSuccess.accept(file);
 			return; // no-op
 		}
 		Consumer<OpenFile> decoratedOnSuccess = f -> {
