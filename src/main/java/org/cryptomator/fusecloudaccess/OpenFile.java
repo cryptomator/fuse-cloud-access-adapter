@@ -12,13 +12,12 @@ import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.Channels;
+import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.FileChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.file.Files;
@@ -26,6 +25,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.nio.file.StandardOpenOption.*;
@@ -36,7 +36,7 @@ class OpenFile implements Closeable {
 	private static final int BUFFER_SIZE = 1024; // 1 kiB
 	private static final int READAHEAD_SIZE = 1024 * 1024; // 1 MiB
 
-	private final FileChannel fc;
+	private final AsynchronousFileChannel fc;
 	private final CloudProvider provider;
 	private final RangeSet<Long> populatedRanges;
 	private final AtomicInteger openFileHandleCount;
@@ -45,7 +45,7 @@ class OpenFile implements Closeable {
 	private boolean dirty;
 
 	// visible for testing
-	OpenFile(CloudPath path, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified) {
+	OpenFile(CloudPath path, AsynchronousFileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified) {
 		this.path = path;
 		this.fc = fc;
 		this.provider = provider;
@@ -66,7 +66,7 @@ class OpenFile implements Closeable {
 	 * @throws IOException I/O errors during creation of the cache file located at <code>tmpFilePath</code>
 	 */
 	public static OpenFile create(CloudPath path, Path tmpFilePath, CloudProvider provider, long initialSize, Instant initialLastModified) throws IOException {
-		var fc = FileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE, DELETE_ON_CLOSE);
+		var fc = AsynchronousFileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE, DELETE_ON_CLOSE);
 		if (initialSize > 0) {
 			fc.write(ByteBuffer.allocateDirect(1), initialSize - 1); // grow file to initialSize
 		}
@@ -143,12 +143,14 @@ class OpenFile implements Closeable {
 		return load(offset, count).thenCompose(ignored -> {
 			try {
 				long pos = offset;
+				var out = ByteBuffer.allocate(BUFFER_SIZE);
 				while (pos < offset + count) {
-					int n = (int) Math.min(BUFFER_SIZE, count - (pos - offset)); // int-cast: n <= BUFFER_SIZE
-					var out = new ByteArrayOutputStream();
-					long transferred = fc.transferTo(pos, n, Channels.newChannel(out));
-					assert transferred == out.size();
-					buf.put(pos - offset, out.toByteArray(), 0, out.size());
+					int n = (int) Math.min(BUFFER_SIZE, count + offset - pos); // int-cast: n <= BUFFER_SIZE
+					out.limit(n);
+					out.position(0);
+					long transferred = fc.read(out, pos).get();
+					assert transferred == out.limit();
+					buf.put(pos - offset, out.array(), 0, out.limit());
 					pos += transferred;
 					if (transferred < n) {
 						break; // EOF
@@ -156,8 +158,16 @@ class OpenFile implements Closeable {
 				}
 				int totalRead = (int) (pos - offset); // TODO: can we return long?
 				return CompletableFuture.completedFuture(totalRead);
-			} catch (IOException e) {
+			} catch (InterruptedException e){
+				LOG.info("Interrupted read().");
 				return CompletableFuture.failedFuture(e);
+			} catch (ExecutionException e) {
+				if( e.getCause() instanceof IOException){
+					return CompletableFuture.failedFuture(e.getCause());
+				} else {
+					LOG.warn("Execution of read() failed due to unexpected exception.",e);
+					return CompletableFuture.failedFuture(e);
+				}
 			}
 		});
 	}
@@ -181,7 +191,18 @@ class OpenFile implements Closeable {
 			int n = (int) Math.min(BUFFER_SIZE, count - (pos - offset)); // int-cast: n <= BUFFER_SIZE
 			byte[] tmp = new byte[n];
 			buf.get(pos - offset, tmp, 0, n);
-			pos += fc.write(ByteBuffer.wrap(tmp), pos);
+			try {
+				pos += fc.write(ByteBuffer.wrap(tmp), pos).get();
+			} catch (InterruptedException e) {
+				//TODO: handle dis better
+				LOG.info("Interrupted write().");
+				e.printStackTrace();
+				throw new IOException("Interrupt");
+			} catch (ExecutionException e) {
+				if (e.getCause() instanceof IOException){
+					throw (IOException) e.getCause();
+				}
+			}
 		}
 		int written = (int) (pos - offset); // int-cast: result <= size
 		synchronized (populatedRanges) {
@@ -262,12 +283,38 @@ class OpenFile implements Closeable {
 				long offset = r.lowerEndpoint();
 				long size = r.upperEndpoint() - r.lowerEndpoint();
 				source.skip(offset - idx); // skip bytes between missing ranges (i.e. already populated)
-				long transferred = fc.transferFrom(Channels.newChannel(source), offset, size);
+				long transferred = transferSingleMissingRange(source, offset, size);
 				var transferredRange = Range.closedOpen(offset, offset + transferred);
 				populatedRanges.add(transferredRange);
 				idx = r.upperEndpoint();
 			}
 		}
+	}
+
+	long transferSingleMissingRange(InputStream source, long offset, long size) throws IOException{
+		ByteBuffer buf = ByteBuffer.allocate(BUFFER_SIZE);
+		var pos = offset;
+		while (pos < offset + size) {
+			int n = (int) Math.min(BUFFER_SIZE, size - (pos - offset)); // int-cast: n <= BUFFER_SIZE
+			int newLimit = source.readNBytes(buf.array(),0,n);
+			buf.limit(newLimit);
+			buf.position(0);
+			try {
+				pos += fc.write(buf, pos).get();
+			} catch (InterruptedException e) {
+				LOG.info("Interrupted merge().");
+				e.printStackTrace();
+				throw new IOException("Interrupt"); //FIXME
+			} catch (ExecutionException e) {
+				if (e.getCause() instanceof IOException){
+					throw (IOException) e.getCause();
+				} else {
+					LOG.warn("Unexpected exception during write to "+path+" appeared.",e);
+					throw new RuntimeException(e); //FIXME: please look for something better
+				}
+			}
+		}
+		return pos - offset;
 	}
 
 	/**
@@ -319,12 +366,44 @@ class OpenFile implements Closeable {
 	public synchronized CompletionStage<Void> persistTo(Path destination) {
 		Preconditions.checkState(fc.isOpen());
 		return load(0, getSize()).thenCompose(ignored -> {
-			try (WritableByteChannel dst = Files.newByteChannel(destination, CREATE_NEW, WRITE)) {
-				fc.transferTo(0, fc.size(), dst);
+			try {
+				fc.force(true);
+				//TODO: research if Files.copy() can be used (AsyncFileChannel does not implement ByteChannel)
+				readCompleteFile(destination);
+				//fc.transferTo(0, fc.size(), dst);
 				return CompletableFuture.completedFuture(null);
-			} catch (IOException e) {
+			} catch (InterruptedException | IOException e) {
 				return CompletableFuture.failedFuture(e);
 			}
 		});
+	}
+
+	void readCompleteFile(Path destination) throws IOException, InterruptedException {
+		try (WritableByteChannel dst = Files.newByteChannel(destination, CREATE_NEW, WRITE)) {
+			long pos = 0;
+			var end = fc.size();
+			var out = ByteBuffer.allocate(BUFFER_SIZE);
+			while (pos < end) {
+				int n = (int) Math.min(BUFFER_SIZE, end - pos); // int-cast: n <= BUFFER_SIZE
+				out.limit(n);
+				try {
+					long read = fc.read(out, pos).get();
+					assert read == out.limit();
+					out.position(0);
+					long written = dst.write(out);
+					pos += written;
+					if (written < n) {
+						break; // EOF
+					}
+				} catch (ExecutionException e) {
+					if (e.getCause() instanceof IOException) {
+						throw (IOException) e.getCause();
+					} else {
+						LOG.warn("Unexpected exception during write to "+path+" appeared.",e);
+						throw new RuntimeException(e); //FIXME: please look for something better
+					}
+				}
+			}
+		}
 	}
 }
