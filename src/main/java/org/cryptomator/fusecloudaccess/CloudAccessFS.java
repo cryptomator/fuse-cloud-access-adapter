@@ -529,8 +529,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	@Override
-	public void umount() {
-		super.umount();
+	public void destroy(Pointer initResult) {
 		LOG.debug("Waiting for pending uploads...");
 		try {
 			while (true) {
@@ -547,4 +546,5 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			LOG.error("Pending uploads interrupted.", e);
 		}
 	}
+
 }
