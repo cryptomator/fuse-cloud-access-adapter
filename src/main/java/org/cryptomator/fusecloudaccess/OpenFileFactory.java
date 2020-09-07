@@ -115,6 +115,7 @@ class OpenFileFactory {
 		uploader.cancelUpload(newPath);
 		var activeFile = activeFiles.remove(oldPath);
 		activeFiles.compute(newPath, (p, previouslyActiveFile) -> {
+			assert previouslyActiveFile == null || previouslyActiveFile != activeFile; // if previousActiveFile is non-null, it must not be the same as activeFile!
 			if (previouslyActiveFile != null) {
 				previouslyActiveFile.close();
 			}
