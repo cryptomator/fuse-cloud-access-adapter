@@ -3,6 +3,8 @@ package org.cryptomator.fusecloudaccess;
 import com.google.common.base.Preconditions;
 import jnr.ffi.Pointer;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.CompletionHandler;
@@ -49,6 +51,41 @@ class CompletableAsynchronousFileChannel {
 				return this.readToPointer(ptr, position + read, count - read, totalRead + read);
 			}
 		});
+	}
+
+	/**
+	 * Transfers up to <code>count</code> bytes from <code>in</code> to this file channel starting at <code>position</code>.
+	 *
+	 * @param src              The source to read from
+	 * @param position         The position in the file channel
+	 * @param count            The number of bytes to read
+	 * @param totalTransferred Already trasnferred bytes (MUST BE 0) - used internally during recursion
+	 * @return The total number of bytes transferred, which is <code>count</code> unless reaching EOF.
+	 */
+	public CompletableFuture<Long> transferFrom(InputStream src, long position, long count, long totalTransferred) {
+		Preconditions.checkArgument(position >= 0);
+		Preconditions.checkArgument(count > 0);
+		Preconditions.checkArgument(totalTransferred >= 0);
+		int n = (int) Math.min(BUFFER_SIZE, count); // int-cast: n <= BUFFER_SIZE
+		try {
+			byte[] bytes = src.readNBytes(n);
+			if (bytes.length == 0) { // EOF
+				return CompletableFuture.completedFuture(totalTransferred);
+			}
+			return this.writeAll(ByteBuffer.wrap(bytes), position).thenCompose(written -> {
+				assert bytes.length == written;
+				if (written == count // DONE, wrote requested number of bytes
+						|| bytes.length < n) { // EOF
+					return CompletableFuture.completedFuture(totalTransferred + written);
+				} else { // CONTINUE, further bytes to be transferred
+					assert written < count;
+					assert written == n;
+					return this.transferFrom(src, position + written, count - written, totalTransferred + written);
+				}
+			});
+		} catch (IOException e) {
+			return CompletableFuture.failedFuture(e);
+		}
 	}
 
 	public CompletableFuture<Integer> read(ByteBuffer dst, long position) {
