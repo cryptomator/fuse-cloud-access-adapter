@@ -25,8 +25,7 @@ class CompletableAsynchronousFileChannel {
 	 * @param position  The position in the file channel
 	 * @param count     The number of bytes to read
 	 * @param totalRead Already read bytes (MUST BE 0) - used internally during recursion
-	 * @return A completable future which returns the total number of read bytes,
-	 * which is equal to <code>count</code> unless reaching EOF.
+	 * @return The total number of bytes read, which is <code>count</code> unless reaching EOF.
 	 */
 	public CompletableFuture<Long> readToPointer(Pointer ptr, long position, long count, long totalRead) {
 		Preconditions.checkArgument(position >= 0);
@@ -56,6 +55,31 @@ class CompletableAsynchronousFileChannel {
 		CompletableFuture<Integer> future = new CompletableFuture<>();
 		fc.read(dst, position, future, new FutureCompleter());
 		return future;
+	}
+
+	/**
+	 * Other than {@link #write(ByteBuffer, long)}, this method keeps writing until all available bytes in
+	 * <code>src</code> have been written. Upon completion, <code>src</code>'s position will have proceeded to its
+	 * limit and therefore no more bytes are available.
+	 * <p>
+	 * Use {@link ByteBuffer#asReadOnlyBuffer()} to prevent unwanted concurrent modifications to <code>src</code>.
+	 *
+	 * @param src      The data to write
+	 * @param position The position in the file channel
+	 * @return The number of bytes written (i.e. the number of bytes available in <code>src</code>).
+	 */
+	public CompletableFuture<Integer> writeAll(ByteBuffer src, long position) {
+		return writeAllInternal(src, position, 0);
+	}
+
+	private CompletableFuture<Integer> writeAllInternal(ByteBuffer src, long position, int totalWritten) {
+		return write(src, position).thenCompose(written -> {
+			if (src.hasRemaining()) {
+				return writeAllInternal(src, position + written, totalWritten + written);
+			} else {
+				return CompletableFuture.completedFuture(totalWritten + written);
+			}
+		});
 	}
 
 	public CompletableFuture<Integer> write(ByteBuffer src, long position) {

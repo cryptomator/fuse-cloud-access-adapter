@@ -2,6 +2,7 @@ package org.cryptomator.fusecloudaccess;
 
 import jnr.ffi.Pointer;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -201,6 +202,34 @@ public class CompletableAsynchronousFileChannelTest {
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
 
 		Assertions.assertEquals(13, result);
+	}
+
+	@Test
+	public void testWriteAll() {
+		Mockito.doAnswer(invocation -> {
+			ByteBuffer buffer = invocation.getArgument(0);
+			buffer.position(buffer.position() + 50);
+			CompletableFuture<Integer> attachment = invocation.getArgument(2);
+			CompletionHandler<Integer, CompletableFuture<Integer>> completionHandler = invocation.getArgument(3);
+			completionHandler.completed(50, attachment);
+			return null;
+		}).when(fc).write(Mockito.any(), Mockito.eq(0l), Mockito.any(), Mockito.any());
+		Mockito.doAnswer(invocation -> {
+			ByteBuffer buffer = invocation.getArgument(0);
+			buffer.position(buffer.position() + 30);
+			CompletableFuture<Integer> attachment = invocation.getArgument(2);
+			CompletionHandler<Integer, CompletableFuture<Integer>> completionHandler = invocation.getArgument(3);
+			completionHandler.completed(30, attachment);
+			return null;
+		}).when(fc).write(Mockito.any(), Mockito.eq(50l), Mockito.any(), Mockito.any());
+		var buffer = ByteBuffer.allocate(80);
+		Assumptions.assumeTrue(buffer.hasRemaining());
+
+		var futureResult = completableFc.writeAll(buffer, 0l);
+		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
+
+		Assertions.assertEquals(80, result);
+		Assertions.assertFalse(buffer.hasRemaining());
 	}
 
 }
