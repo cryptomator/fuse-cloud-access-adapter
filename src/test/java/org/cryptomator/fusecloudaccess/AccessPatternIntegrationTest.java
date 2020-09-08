@@ -153,7 +153,7 @@ public class AccessPatternIntegrationTest {
 		Instant modTime3 = Instant.ofEpochSecond(stat3.st_mtim.tv_sec.longValue(), stat3.st_mtim.tv_nsec.longValue());
 		Assertions.assertEquals(3, stat2.st_size.intValue());
 		Assertions.assertEquals(6, stat3.st_size.intValue());
-		Assertions.assertTrue(modTime1.equals(modTime2), "modified date of stat1 equals stat2");
+		Assertions.assertEquals(modTime1, modTime2);
 		Assertions.assertTrue(modTime2.isBefore(modTime3), "modified date of stat2 is before stat3");
 
 		// mv foo.txt foo.txt-temp3001
@@ -186,7 +186,7 @@ public class AccessPatternIntegrationTest {
 		TestFileStat stat4 = TestFileStat.create();
 		fs.getattr("/foo.txt", stat4);
 		Instant modTime4 = Instant.ofEpochSecond(stat4.st_mtim.tv_sec.longValue(), stat4.st_mtim.tv_nsec.longValue());
-		Assertions.assertTrue(modTime3.equals(modTime4), "modified date of stat3 equals stat4");
+		Assertions.assertEquals(modTime3, modTime4);
 
 		// now release:
 		fs.release("/foo.txt", fi4);
