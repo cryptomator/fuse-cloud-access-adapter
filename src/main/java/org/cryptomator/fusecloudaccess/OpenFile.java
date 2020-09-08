@@ -5,6 +5,7 @@ import com.google.common.collect.ImmutableRangeSet;
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
 import com.google.common.collect.TreeRangeSet;
+import com.google.common.io.Closeables;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
@@ -23,10 +24,12 @@ import java.nio.channels.WritableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Iterator;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 import static java.nio.file.StandardOpenOption.*;
 
@@ -36,7 +39,7 @@ class OpenFile implements Closeable {
 	private static final int BUFFER_SIZE = 1024; // 1 kiB
 	private static final int READAHEAD_SIZE = 1024 * 1024; // 1 MiB
 
-	private final AsynchronousFileChannel fc;
+	private final CompletableAsynchronousFileChannel fc;
 	private final CloudProvider provider;
 	private final RangeSet<Long> populatedRanges;
 	private final AtomicInteger openFileHandleCount;
@@ -44,8 +47,9 @@ class OpenFile implements Closeable {
 	private Instant lastModified;
 	private boolean dirty;
 
+
 	// visible for testing
-	OpenFile(CloudPath path, AsynchronousFileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified) {
+	OpenFile(CloudPath path, CompletableAsynchronousFileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified) {
 		this.path = path;
 		this.fc = fc;
 		this.provider = provider;
@@ -70,7 +74,7 @@ class OpenFile implements Closeable {
 		if (initialSize > 0) {
 			fc.write(ByteBuffer.allocateDirect(1), initialSize - 1); // grow file to initialSize
 		}
-		return new OpenFile(path, fc, provider, TreeRangeSet.create(), initialLastModified);
+		return new OpenFile(path, new CompletableAsynchronousFileChannel(fc), provider, TreeRangeSet.create(), initialLastModified);
 	}
 
 	public CloudPath getPath() {
@@ -140,36 +144,7 @@ class OpenFile implements Closeable {
 			// reads starting beyond EOF are no-op
 			return CompletableFuture.completedFuture(0);
 		}
-		return load(offset, count).thenCompose(ignored -> {
-			try {
-				long pos = offset;
-				var out = ByteBuffer.allocate(BUFFER_SIZE);
-				while (pos < offset + count) {
-					int n = (int) Math.min(BUFFER_SIZE, count + offset - pos); // int-cast: n <= BUFFER_SIZE
-					out.limit(n);
-					out.position(0);
-					long transferred = fc.read(out, pos).get();
-					assert transferred == out.limit();
-					buf.put(pos - offset, out.array(), 0, out.limit());
-					pos += transferred;
-					if (transferred < n) {
-						break; // EOF
-					}
-				}
-				int totalRead = (int) (pos - offset); // TODO: can we return long?
-				return CompletableFuture.completedFuture(totalRead);
-			} catch (InterruptedException e){
-				LOG.info("Interrupted read().");
-				return CompletableFuture.failedFuture(e);
-			} catch (ExecutionException e) {
-				if( e.getCause() instanceof IOException){
-					return CompletableFuture.failedFuture(e.getCause());
-				} else {
-					LOG.warn("Execution of read() failed due to unexpected exception.",e);
-					return CompletableFuture.failedFuture(e);
-				}
-			}
-		});
+		return load(offset, count).thenCompose(ignored -> fc.readToPointer(buf, offset, count));
 	}
 
 	/**
@@ -253,13 +228,9 @@ class OpenFile implements Closeable {
 		assert !populatedRanges.intersects(requestedRange); // synchronized by caller
 		long offset = requestedRange.lowerEndpoint();
 		long size = requestedRange.upperEndpoint() - requestedRange.lowerEndpoint();
-		return provider.read(path, offset, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(inputStream -> {
-			try (var in = inputStream) {
-				mergeData(requestedRange, in);
-				return CompletableFuture.completedFuture(null);
-			} catch (IOException e) {
-				return CompletableFuture.failedFuture(e);
-			}
+		return provider.read(path, offset, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
+			var merged = mergeData(requestedRange, in);
+			return CompletionUtils.runAlways(merged, () -> Closeables.closeQuietly(in));
 		});
 	}
 
@@ -272,49 +243,39 @@ class OpenFile implements Closeable {
 	 *
 	 * @param range  Where to place the data within the file channel
 	 * @param source The data source
-	 * @throws IOException
+	 * @return
 	 */
 	// visible for testing
-	void mergeData(Range<Long> range, InputStream source) throws IOException {
+	CompletableFuture<Void> mergeData(Range<Long> range, InputStream source) {
 		synchronized (populatedRanges) {
-			var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges);
-			long idx = range.lowerEndpoint();
-			for (var r : missingRanges.asRanges()) { // known to be sorted ascending
-				long offset = r.lowerEndpoint();
-				long size = r.upperEndpoint() - r.lowerEndpoint();
-				source.skip(offset - idx); // skip bytes between missing ranges (i.e. already populated)
-				long transferred = transferSingleMissingRange(source, offset, size);
-				var transferredRange = Range.closedOpen(offset, offset + transferred);
-				populatedRanges.add(transferredRange);
-				idx = r.upperEndpoint();
-			}
+			var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges).asRanges().iterator();
+			return mergeDataInternal(missingRanges, source, range.lowerEndpoint());
 		}
 	}
 
-	long transferSingleMissingRange(InputStream source, long offset, long size) throws IOException{
-		ByteBuffer buf = ByteBuffer.allocate(BUFFER_SIZE);
-		var pos = offset;
-		while (pos < offset + size) {
-			int n = (int) Math.min(BUFFER_SIZE, size - (pos - offset)); // int-cast: n <= BUFFER_SIZE
-			int newLimit = source.readNBytes(buf.array(),0,n);
-			buf.limit(newLimit);
-			buf.position(0);
-			try {
-				pos += fc.write(buf, pos).get();
-			} catch (InterruptedException e) {
-				LOG.info("Interrupted merge().");
-				e.printStackTrace();
-				throw new IOException("Interrupt"); //FIXME
-			} catch (ExecutionException e) {
-				if (e.getCause() instanceof IOException){
-					throw (IOException) e.getCause();
-				} else {
-					LOG.warn("Unexpected exception during write to "+path+" appeared.",e);
-					throw new RuntimeException(e); //FIXME: please look for something better
-				}
-			}
+	private CompletableFuture<Void> mergeDataInternal(Iterator<Range<Long>> missingRanges, InputStream source, final long pos) {
+		if (!missingRanges.hasNext()) {
+			return CompletableFuture.completedFuture(null);
 		}
-		return pos - offset;
+		var range = missingRanges.next();
+		Preconditions.checkArgument(pos <= range.lowerEndpoint());
+		final long position;
+		if (pos < range.lowerEndpoint()) {
+			try {
+				long skipped = source.skip(range.lowerEndpoint() - pos);
+				position = pos + skipped;
+			} catch (IOException e) {
+				return CompletableFuture.failedFuture(e);
+			}
+		} else {
+			position = pos;
+		}
+		assert position == range.lowerEndpoint();
+		var count = range.upperEndpoint() - range.lowerEndpoint();
+		return fc.transferFrom(source, position, count).thenCompose(transferred -> {
+			populatedRanges.add(Range.closedOpen(position, position + transferred));
+			return mergeDataInternal(missingRanges, source, position + transferred);
+		});
 	}
 
 	/**
