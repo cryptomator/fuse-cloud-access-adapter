@@ -47,7 +47,7 @@ public class CompletableAsynchronousFileChannelTest {
 			var e = new IOException("fail");
 			Mockito.doReturn(CompletableFuture.failedFuture(e)).when(completableFc).read(Mockito.any(), Mockito.anyLong());
 
-			var futureResult = completableFc.readToPointer(ptr, 42l, 100l, 0l);
+			var futureResult = completableFc.readToPointer(ptr, 42l, 100l);
 			var thrown = Assertions.assertThrows(ExecutionException.class, () -> {
 				Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
 			});
@@ -65,10 +65,10 @@ public class CompletableAsynchronousFileChannelTest {
 				return CompletableFuture.completedFuture(100);
 			}).when(completableFc).read(Mockito.any(), Mockito.eq(42l));
 
-			var futureResult = completableFc.readToPointer(ptr, 42l, 100l, 0l);
+			var futureResult = completableFc.readToPointer(ptr, 42l, 100l);
 			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
 
-			Assertions.assertEquals(100l, result);
+			Assertions.assertEquals(100, result);
 			Mockito.verify(ptr).put(Mockito.eq(0l), Mockito.any(byte[].class), Mockito.eq(0), Mockito.eq(100));
 			Mockito.verifyNoMoreInteractions(ptr);
 		}
@@ -87,10 +87,10 @@ public class CompletableAsynchronousFileChannelTest {
 				return CompletableFuture.completedFuture(2 * 1024 * 1024);
 			}).when(completableFc).read(Mockito.any(), Mockito.eq(4l * 1024 * 1024));
 
-			var futureResult = completableFc.readToPointer(ptr, 0l, 6 * 1024 * 1024, 0l);
+			var futureResult = completableFc.readToPointer(ptr, 0l, 6 * 1024 * 1024);
 			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
 
-			Assertions.assertEquals(6l * 1024 * 1024, result);
+			Assertions.assertEquals(6 * 1024 * 1024, result);
 			Mockito.verify(ptr).put(Mockito.eq(0l * 1024 * 1024), Mockito.any(byte[].class), Mockito.eq(0), Mockito.eq(4 * 1024 * 1024));
 			Mockito.verify(ptr).put(Mockito.eq(4l * 1024 * 1024), Mockito.any(byte[].class), Mockito.eq(0), Mockito.eq(2 * 1024 * 1024));
 			Mockito.verifyNoMoreInteractions(ptr);
@@ -110,10 +110,10 @@ public class CompletableAsynchronousFileChannelTest {
 				return CompletableFuture.completedFuture(1 * 1024 * 1024);
 			}).when(completableFc).read(Mockito.any(), Mockito.eq(4l * 1024 * 1024));
 
-			var futureResult = completableFc.readToPointer(ptr, 0l, 6 * 1024 * 1024, 0l);
+			var futureResult = completableFc.readToPointer(ptr, 0l, 6 * 1024 * 1024);
 			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
 
-			Assertions.assertEquals(5l * 1024 * 1024, result);
+			Assertions.assertEquals(5 * 1024 * 1024, result);
 			Mockito.verify(ptr).put(Mockito.eq(0l * 1024 * 1024), Mockito.any(byte[].class), Mockito.eq(0), Mockito.eq(4 * 1024 * 1024));
 			Mockito.verify(ptr).put(Mockito.eq(4l * 1024 * 1024), Mockito.any(byte[].class), Mockito.eq(0), Mockito.eq(1 * 1024 * 1024));
 			Mockito.verifyNoMoreInteractions(ptr);
@@ -131,10 +131,10 @@ public class CompletableAsynchronousFileChannelTest {
 				return CompletableFuture.completedFuture(-1);
 			}).when(completableFc).read(Mockito.any(), Mockito.eq(4l * 1024 * 1024));
 
-			var futureResult = completableFc.readToPointer(ptr, 0l, 6 * 1024 * 1024, 0l);
+			var futureResult = completableFc.readToPointer(ptr, 0l, 6 * 1024 * 1024);
 			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
 
-			Assertions.assertEquals(4l * 1024 * 1024, result);
+			Assertions.assertEquals(4 * 1024 * 1024, result);
 			Mockito.verify(ptr).put(Mockito.eq(0l * 1024 * 1024), Mockito.any(byte[].class), Mockito.eq(0), Mockito.eq(4 * 1024 * 1024));
 			Mockito.verifyNoMoreInteractions(ptr);
 		}
@@ -159,7 +159,7 @@ public class CompletableAsynchronousFileChannelTest {
 			var e = new IOException("fail");
 			Mockito.doThrow(e).when(in).readNBytes(Mockito.anyInt());
 
-			var futureResult = completableFc.transferFrom(in, 42l, 100l, 0l);
+			var futureResult = completableFc.transferFrom(in, 42l, 100l);
 			var thrown = Assertions.assertThrows(ExecutionException.class, () -> {
 				Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
 			});
@@ -175,7 +175,7 @@ public class CompletableAsynchronousFileChannelTest {
 			Mockito.doReturn(CompletableFuture.failedFuture(e)).when(completableFc).writeAll(Mockito.any(), Mockito.anyLong());
 
 
-			var futureResult = completableFc.transferFrom(in, 42l, 100l, 0l);
+			var futureResult = completableFc.transferFrom(in, 42l, 100l);
 			var thrown = Assertions.assertThrows(ExecutionException.class, () -> {
 				Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
 			});
@@ -188,7 +188,7 @@ public class CompletableAsynchronousFileChannelTest {
 		public void transferFromEOF1() throws IOException {
 			Mockito.doReturn(new byte[0]).when(in).readNBytes(100);
 
-			var futureResult = completableFc.transferFrom(in, 42l, 100l, 0l);
+			var futureResult = completableFc.transferFrom(in, 42l, 100l);
 			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
 
 			Assertions.assertEquals(0, result);
@@ -200,7 +200,7 @@ public class CompletableAsynchronousFileChannelTest {
 			Mockito.doReturn(new byte[80]).when(in).readNBytes(100);
 			Mockito.doReturn(CompletableFuture.completedFuture(80)).when(completableFc).writeAll(Mockito.any(), Mockito.eq(42l));
 
-			var futureResult = completableFc.transferFrom(in, 42l, 100l, 0l);
+			var futureResult = completableFc.transferFrom(in, 42l, 100l);
 			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
 
 			Assertions.assertEquals(80, result);
@@ -214,7 +214,7 @@ public class CompletableAsynchronousFileChannelTest {
 			Mockito.doReturn(CompletableFuture.completedFuture(4 * 1024 * 1024)).when(completableFc).writeAll(Mockito.any(), Mockito.eq(0l * 1024 * 1024));
 			Mockito.doReturn(CompletableFuture.completedFuture(1 * 1024 * 1024)).when(completableFc).writeAll(Mockito.any(), Mockito.eq(4l * 1024 * 1024));
 
-			var futureResult = completableFc.transferFrom(in, 0l, 6l * 1024 * 1024, 0l);
+			var futureResult = completableFc.transferFrom(in, 0l, 6l * 1024 * 1024);
 			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
 
 			Assertions.assertEquals(5 * 1024 * 1024, result);
@@ -228,7 +228,7 @@ public class CompletableAsynchronousFileChannelTest {
 			Mockito.doReturn(CompletableFuture.completedFuture(4 * 1024 * 1024)).when(completableFc).writeAll(Mockito.any(), Mockito.eq(0l * 1024 * 1024));
 			Mockito.doReturn(CompletableFuture.completedFuture(2 * 1024 * 1024)).when(completableFc).writeAll(Mockito.any(), Mockito.eq(4l * 1024 * 1024));
 
-			var futureResult = completableFc.transferFrom(in, 0l, 6l * 1024 * 1024, 0l);
+			var futureResult = completableFc.transferFrom(in, 0l, 6l * 1024 * 1024);
 			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
 
 			Assertions.assertEquals(6 * 1024 * 1024, result);

@@ -23,13 +23,16 @@ class CompletableAsynchronousFileChannel {
 	/**
 	 * Reads <code>count</code> bytes beginning from <code>position</code> into <code>ptr</code>.
 	 *
-	 * @param ptr       The buffer where to put read bytes
-	 * @param position  The position in the file channel
-	 * @param count     The number of bytes to read
-	 * @param totalRead Already read bytes (MUST BE 0) - used internally during recursion
+	 * @param ptr      The buffer where to put read bytes
+	 * @param position The position in the file channel
+	 * @param count    The number of bytes to read
 	 * @return The total number of bytes read, which is <code>count</code> unless reaching EOF.
 	 */
-	public CompletableFuture<Long> readToPointer(Pointer ptr, long position, long count, long totalRead) {
+	public CompletableFuture<Integer> readToPointer(Pointer ptr, long position, long count) {
+		return readToPointer(ptr, position, count, 0);
+	}
+
+	private CompletableFuture<Integer> readToPointer(Pointer ptr, long position, long count, int totalRead) {
 		Preconditions.checkArgument(position >= 0);
 		Preconditions.checkArgument(count > 0);
 		Preconditions.checkArgument(totalRead >= 0);
@@ -59,10 +62,13 @@ class CompletableAsynchronousFileChannel {
 	 * @param src              The source to read from
 	 * @param position         The position in the file channel
 	 * @param count            The number of bytes to read
-	 * @param totalTransferred Already trasnferred bytes (MUST BE 0) - used internally during recursion
 	 * @return The total number of bytes transferred, which is <code>count</code> unless reaching EOF.
 	 */
-	public CompletableFuture<Long> transferFrom(InputStream src, long position, long count, long totalTransferred) {
+	public CompletableFuture<Long> transferFrom(InputStream src, long position, long count) {
+		return transferFrom(src, position, count, 0l);
+	}
+
+	private CompletableFuture<Long> transferFrom(InputStream src, long position, long count, long totalTransferred) {
 		Preconditions.checkArgument(position >= 0);
 		Preconditions.checkArgument(count > 0);
 		Preconditions.checkArgument(totalTransferred >= 0);
