@@ -3,6 +3,7 @@ package org.cryptomator.fusecloudaccess;
 import com.google.common.base.Preconditions;
 import jnr.ffi.Pointer;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -10,7 +11,7 @@ import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.CompletionHandler;
 import java.util.concurrent.CompletableFuture;
 
-class CompletableAsynchronousFileChannel {
+class CompletableAsynchronousFileChannel implements Closeable {
 
 	private static final int BUFFER_SIZE = 4 * 1024 * 1024; // 4 MiB
 
@@ -129,6 +130,27 @@ class CompletableAsynchronousFileChannel {
 		CompletableFuture<Integer> future = new CompletableFuture<>();
 		fc.write(src, position, future, new FutureCompleter());
 		return future;
+	}
+
+	public boolean isOpen() {
+		return fc.isOpen();
+	}
+
+	public long size() throws IOException {
+		return fc.size();
+	}
+
+	public void truncate(long size) throws IOException {
+		fc.truncate(size);
+	}
+
+	public void force(boolean metaData) throws IOException {
+		fc.force(metaData);
+	}
+
+	@Override
+	public void close() throws IOException {
+		fc.close();
 	}
 
 	private static class FutureCompleter implements CompletionHandler<Integer, CompletableFuture<Integer>> {
