@@ -28,6 +28,7 @@ import java.io.InputStream;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.EnumSet;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
@@ -136,7 +137,8 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	/**
 	 * Reads metadata. Prefers locally cached metadata and fetches metadata from the cloud as a fallback.
- 	 * @param path
+	 *
+	 * @param path
 	 * @return
 	 */
 	private CompletionStage<CloudItemMetadata> getMetadataFromCacheOrCloud(CloudPath path) {
@@ -244,24 +246,24 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	private CompletionStage<Integer> openInternal(CloudPath path, FuseFileInfo fi) {
 		return getMetadataFromCacheOrCloud(path).thenApply(metadata -> {
-					final var type = metadata.getItemType();
-					if (type == CloudItemType.FILE) {
-						try {
-							var size = metadata.getSize().orElse(0l);
-							var lastModified = metadata.getLastModifiedDate().orElse(Instant.EPOCH);
-							var handle = openFileFactory.open(path, BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, lastModified);
-							fi.fh.set(handle);
-							return 0;
-						} catch (IOException e) {
-							return -ErrorCodes.EIO();
-						}
-					} else if (type == CloudItemType.FOLDER) {
-						return -ErrorCodes.EISDIR();
-					} else {
-						LOG.error("Attempted to open() {}, which is not a file.", path);
-						return -ErrorCodes.EIO();
-					}
-				}) //
+			final var type = metadata.getItemType();
+			if (type == CloudItemType.FILE) {
+				try {
+					var size = metadata.getSize().orElse(0l);
+					var lastModified = metadata.getLastModifiedDate().orElse(Instant.EPOCH);
+					var handle = openFileFactory.open(path, BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, lastModified);
+					fi.fh.set(handle);
+					return 0;
+				} catch (IOException e) {
+					return -ErrorCodes.EIO();
+				}
+			} else if (type == CloudItemType.FOLDER) {
+				return -ErrorCodes.EISDIR();
+			} else {
+				LOG.error("Attempted to open() {}, which is not a file.", path);
+				return -ErrorCodes.EIO();
+			}
+		}) //
 				.exceptionally(e -> {
 					if (e instanceof NotFoundException) {
 						return -ErrorCodes.ENOENT();
@@ -356,19 +358,45 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	private CompletionStage<Integer> createInternal(CloudPath path, long mode, FuseFileInfo fi) {
-		return provider.write(path, false, InputStream.nullInputStream(), 0l, ProgressListener.NO_PROGRESS_AWARE) //
-				.handle((metadata, exception) -> {
+		var modifiedDate = Instant.now();
+		return provider.write(path, false, InputStream.nullInputStream(), 0l, Optional.of(Instant.now()), ProgressListener.NO_PROGRESS_AWARE) //
+				.handle((nullReturn, exception) -> {
 					if (exception == null) {
 						// no exception means: 0-byte file successfully created
-						return CompletableFuture.completedFuture(metadata);
+						return createInternalNonExisting(path, mode, fi, modifiedDate);
 					} else if (exception instanceof AlreadyExistsException) {
-						// in case of an already existing file, return the existing file's metadata
-						return provider.itemMetadata(path);
+						// in case of an already existing file, return null
+						return createInternalExisting(path, mode, fi);
 					} else {
-						return CompletableFuture.<CloudItemMetadata>failedFuture(exception);
+						return CompletableFuture.<Integer>failedFuture(exception);
 					}
 				}) //
-				.thenCompose(Function.identity()) //
+				.thenCompose(Function.identity())
+				.exceptionally(e -> {
+					if (e instanceof NotFoundException) {
+						return -ErrorCodes.ENOENT();
+					} else if (e instanceof TypeMismatchException) {
+						return -ErrorCodes.EISDIR();
+					} else {
+						LOG.error("create() failed", e);
+						return -ErrorCodes.EIO();
+					}
+				});
+	}
+
+	private CompletionStage<Integer> createInternalNonExisting(CloudPath path, long mode, FuseFileInfo fi, Instant modifiedDate) {
+		try {
+			var size = 0;
+			var handle = openFileFactory.open(path, BitMaskEnumUtil.bitMaskToSet(OpenFlags.class, fi.flags.longValue()), size, modifiedDate);
+			fi.fh.set(handle);
+			return CompletableFuture.completedFuture(0);
+		} catch (IOException e) {
+			return CompletableFuture.completedFuture(-ErrorCodes.EIO());
+		}
+	}
+
+	private CompletionStage<Integer> createInternalExisting(CloudPath path, long mode, FuseFileInfo fi) {
+		return provider.itemMetadata(path)
 				.thenApply(metadata -> {
 					try {
 						var size = metadata.getSize().orElse(0l);
@@ -377,16 +405,6 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 						fi.fh.set(handle);
 						return 0;
 					} catch (IOException e) {
-						return -ErrorCodes.EIO();
-					}
-				}) //
-				.exceptionally(e -> {
-					if (e instanceof NotFoundException) {
-						return -ErrorCodes.ENOENT();
-					} else if (e instanceof TypeMismatchException) {
-						return -ErrorCodes.EISDIR();
-					} else {
-						LOG.error("create() failed", e);
 						return -ErrorCodes.EIO();
 					}
 				});

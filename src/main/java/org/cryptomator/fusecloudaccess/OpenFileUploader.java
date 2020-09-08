@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
@@ -115,9 +116,10 @@ class OpenFileUploader {
 			try {
 				openFile.persistTo(tmpFile).toCompletableFuture().get();
 				assert Files.exists(tmpFile);
-				var size = Files.size(tmpFile);
+				var size = openFile.getSize();
+				var lastModified = openFile.getLastModified();
 				try (var in = Files.newInputStream(tmpFile)) {
-					provider.write(openFile.getPath(), true, in, size, ProgressListener.NO_PROGRESS_AWARE) //
+					provider.write(openFile.getPath(), true, in, size, Optional.of(lastModified), ProgressListener.NO_PROGRESS_AWARE) //
 							.toCompletableFuture() //
 							.get();
 				}

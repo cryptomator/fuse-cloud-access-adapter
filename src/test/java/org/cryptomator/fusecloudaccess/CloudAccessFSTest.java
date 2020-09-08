@@ -702,7 +702,7 @@ public class CloudAccessFSTest {
 			CloudItemMetadata itemMetadata = Mockito.mock(CloudItemMetadata.class);
 			Mockito.when(itemMetadata.getPath()).thenReturn(PATH);
 			Mockito.when(fileFactory.open(Mockito.any(), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(1337l);
-			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(itemMetadata));
+			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.anyLong(), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(null));
 
 			var actualResult = cloudFs.create(PATH.toString(), mode, fi);
 
@@ -720,7 +720,7 @@ public class CloudAccessFSTest {
 			Mockito.when(itemMetadata.getPath()).thenReturn(PATH);
 			Mockito.when(itemMetadata.getSize()).thenReturn(Optional.of(42l));
 			Mockito.when(fileFactory.open(Mockito.any(), Mockito.anySet(), Mockito.anyLong(), Mockito.any())).thenReturn(1337l);
-			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
+			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.anyLong(), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
 			Mockito.when(provider.itemMetadata(Mockito.eq(PATH))).thenReturn(CompletableFuture.completedFuture(itemMetadata));
 
 			var actualResult = cloudFs.create(PATH.toString(), mode, fi);
@@ -734,7 +734,7 @@ public class CloudAccessFSTest {
 		@Test
 		public void testNotFoundExceptionReturnsENOENT() {
 			var e = new NotFoundException(PATH.toString());
-			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
+			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.anyLong(), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
 
 			var actualResult = cloudFs.create(PATH.toString(), mode, fi);
 
@@ -745,7 +745,7 @@ public class CloudAccessFSTest {
 		@Test
 		public void testTypeMismatchExceptionReturnsEISDIR() {
 			var e = new TypeMismatchException(PATH.toString());
-			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
+			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.anyLong(), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
 
 			var actualResult = cloudFs.create(PATH.toString(), mode, fi);
 
@@ -756,7 +756,7 @@ public class CloudAccessFSTest {
 		@ValueSource(classes = {CloudProviderException.class, Exception.class})
 		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
 			var e = exceptionClass.getDeclaredConstructor().newInstance();
-			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
+			Mockito.when(provider.write(Mockito.eq(PATH), Mockito.eq(false), Mockito.any(), Mockito.anyLong(), Mockito.any(), Mockito.any())).thenReturn(CompletableFuture.failedFuture(e));
 
 			var actualResult = cloudFs.create(PATH.toString(), mode, fi);
 

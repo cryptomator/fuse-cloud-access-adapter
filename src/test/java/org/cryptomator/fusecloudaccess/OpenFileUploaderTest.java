@@ -1,6 +1,5 @@
 package org.cryptomator.fusecloudaccess;
 
-import org.cryptomator.cloudaccess.api.CloudItemMetadata;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.exceptions.CloudProviderException;
@@ -18,6 +17,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
@@ -173,10 +174,10 @@ public class OpenFileUploaderTest {
 	@Nested
 	public class ScheduledUploadTest {
 
-		private Path tmpDir;
 		CloudProvider provider;
 		OpenFile openFile;
 		Consumer<OpenFile> onFinished;
+		private Path tmpDir;
 		private OpenFileUploader.ScheduledUpload upload;
 
 		@BeforeEach
@@ -209,13 +210,16 @@ public class OpenFileUploaderTest {
 		public void testCloudProviderExceptionDuringUpload() throws IOException {
 			var e = new CloudProviderException("fail");
 			var cloudPath = Mockito.mock(CloudPath.class, "/path/to/file");
+			var lastModified = Instant.now();
 			Mockito.when(openFile.persistTo(Mockito.any())).thenAnswer(invocation -> {
 				Path path = invocation.getArgument(0);
 				Files.write(path, new byte[42]);
 				return CompletableFuture.completedFuture(null);
 			});
 			Mockito.when(openFile.getPath()).thenReturn(cloudPath);
-			Mockito.when(provider.write(Mockito.eq(cloudPath), Mockito.eq(true), Mockito.any(), Mockito.eq(42l), Mockito.any()))
+			Mockito.when(openFile.getLastModified()).thenReturn(lastModified);
+			Mockito.when(openFile.getSize()).thenReturn(42l);
+			Mockito.when(provider.write(Mockito.eq(cloudPath), Mockito.eq(true), Mockito.any(), Mockito.eq(42l), Mockito.eq(Optional.of(lastModified)), Mockito.any()))
 					.thenReturn(CompletableFuture.failedFuture(e));
 
 			var thrown = Assertions.assertThrows(IOException.class, () -> {
@@ -232,14 +236,17 @@ public class OpenFileUploaderTest {
 		@DisplayName("upload succeeds")
 		public void testSuccessfulUpload() throws IOException {
 			var cloudPath = Mockito.mock(CloudPath.class, "/path/to/file");
+			var lastModified = Instant.now();
 			Mockito.when(openFile.persistTo(Mockito.any())).thenAnswer(invocation -> {
 				Path path = invocation.getArgument(0);
 				Files.write(path, new byte[42]);
 				return CompletableFuture.completedFuture(null);
 			});
 			Mockito.when(openFile.getPath()).thenReturn(cloudPath);
-			Mockito.when(provider.write(Mockito.eq(cloudPath), Mockito.eq(true), Mockito.any(), Mockito.eq(42l), Mockito.any()))
-					.thenReturn(CompletableFuture.completedFuture(Mockito.mock(CloudItemMetadata.class)));
+			Mockito.when(openFile.getLastModified()).thenReturn(lastModified);
+			Mockito.when(openFile.getSize()).thenReturn(42l);
+			Mockito.when(provider.write(Mockito.eq(cloudPath), Mockito.eq(true), Mockito.any(), Mockito.eq(42l), Mockito.eq(Optional.of(lastModified)), Mockito.any()))
+					.thenReturn(CompletableFuture.completedFuture(null));
 
 			upload.call();
 
