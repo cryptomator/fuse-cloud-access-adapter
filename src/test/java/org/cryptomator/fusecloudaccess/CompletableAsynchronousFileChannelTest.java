@@ -29,7 +29,8 @@ public class CompletableAsynchronousFileChannelTest {
 	}
 
 	@Nested
-	public class RecursiveRead {
+	@DisplayName("readToPointer(...)")
+	public class ReadToPointer {
 
 		private Pointer ptr;
 
@@ -40,6 +41,7 @@ public class CompletableAsynchronousFileChannelTest {
 		}
 
 		@Test
+		@DisplayName("exception during read(...)")
 		public void readToPointerFails() {
 			var e = new IOException("fail");
 			Mockito.doReturn(CompletableFuture.failedFuture(e)).when(completableFc).read(Mockito.any(), Mockito.anyLong());
@@ -54,6 +56,7 @@ public class CompletableAsynchronousFileChannelTest {
 		}
 
 		@Test
+		@DisplayName("successful single-pass read")
 		public void readToPointerSucceedsInSingleIteration() {
 			Mockito.doAnswer(invocation -> {
 				ByteBuffer buf = invocation.getArgument(0);
@@ -70,6 +73,7 @@ public class CompletableAsynchronousFileChannelTest {
 		}
 
 		@Test
+		@DisplayName("successful recursive read")
 		public void readToPointerSucceedsInTwoIteration() {
 			Mockito.doAnswer(invocation -> {
 				ByteBuffer buf = invocation.getArgument(0);
@@ -92,6 +96,7 @@ public class CompletableAsynchronousFileChannelTest {
 		}
 
 		@Test
+		@DisplayName("successful recursive read till EOF 1")
 		public void readToPointerSucceedsInTwoIterationAtEOF1() {
 			Mockito.doAnswer(invocation -> {
 				ByteBuffer buf = invocation.getArgument(0);
@@ -114,6 +119,7 @@ public class CompletableAsynchronousFileChannelTest {
 		}
 
 		@Test
+		@DisplayName("successful recursive read till EOF 2")
 		public void readToPointerSucceedsInTwoIterationAtEOF2() {
 			Mockito.doAnswer(invocation -> {
 				ByteBuffer buf = invocation.getArgument(0);
@@ -135,6 +141,7 @@ public class CompletableAsynchronousFileChannelTest {
 	}
 
 	@Test
+	@DisplayName("read(...) fails with IOException")
 	public void testReadFailsExceptionally() {
 		var buf = Mockito.mock(ByteBuffer.class);
 		var e = new IOException("fail.");
@@ -154,6 +161,7 @@ public class CompletableAsynchronousFileChannelTest {
 	}
 
 	@Test
+	@DisplayName("read(...) succeeds")
 	public void testRead13Bytes() {
 		var buf = Mockito.mock(ByteBuffer.class);
 		Mockito.doAnswer(invocation -> {
@@ -170,6 +178,7 @@ public class CompletableAsynchronousFileChannelTest {
 	}
 
 	@Test
+	@DisplayName("write(...) fails with IOException")
 	public void testWriteFailsExceptionally() {
 		var buf = Mockito.mock(ByteBuffer.class);
 		var e = new IOException("fail.");
@@ -189,6 +198,7 @@ public class CompletableAsynchronousFileChannelTest {
 	}
 
 	@Test
+	@DisplayName("write(...) succeeds")
 	public void testWrite13Bytes() {
 		var buf = Mockito.mock(ByteBuffer.class);
 		Mockito.doAnswer(invocation -> {
@@ -205,6 +215,7 @@ public class CompletableAsynchronousFileChannelTest {
 	}
 
 	@Test
+	@DisplayName("writeAll(...) keeps on writing until no more bytes remaining")
 	public void testWriteAll() {
 		Mockito.doAnswer(invocation -> {
 			ByteBuffer buffer = invocation.getArgument(0);
