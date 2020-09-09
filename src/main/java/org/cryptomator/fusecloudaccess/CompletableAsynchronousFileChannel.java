@@ -9,6 +9,7 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.CompletionHandler;
+import java.nio.channels.WritableByteChannel;
 import java.util.concurrent.CompletableFuture;
 
 class CompletableAsynchronousFileChannel implements Closeable {
@@ -60,9 +61,9 @@ class CompletableAsynchronousFileChannel implements Closeable {
 	/**
 	 * Transfers up to <code>count</code> bytes from <code>in</code> to this file channel starting at <code>position</code>.
 	 *
-	 * @param src              The source to read from
-	 * @param position         The position in the file channel
-	 * @param count            The number of bytes to read
+	 * @param src      The source to read from
+	 * @param position The position in the file channel
+	 * @param count    The number of bytes to transfer
 	 * @return The total number of bytes transferred, which is <code>count</code> unless reaching EOF.
 	 */
 	public CompletableFuture<Long> transferFrom(InputStream src, long position, long count) {
@@ -81,7 +82,7 @@ class CompletableAsynchronousFileChannel implements Closeable {
 			}
 			return this.writeAll(ByteBuffer.wrap(bytes), position).thenCompose(written -> {
 				assert bytes.length == written;
-				if (written == count // DONE, wrote requested number of bytes
+				if (written == count // DONE, transferred requested number of bytes
 						|| bytes.length < n) { // EOF
 					return CompletableFuture.completedFuture(totalTransferred + written);
 				} else { // CONTINUE, further bytes to be transferred
@@ -93,6 +94,48 @@ class CompletableAsynchronousFileChannel implements Closeable {
 		} catch (IOException e) {
 			return CompletableFuture.failedFuture(e);
 		}
+	}
+
+	/**
+	 * Transfers up to <code>count</code> bytes from this file to <code>in</code> starting at <code>position</code>.
+	 *
+	 * @param position The position in the file channel
+	 * @param count    The number of bytes to transfer
+	 * @param dst      The target to write to
+	 * @return The total number of bytes transferred, which is <code>count</code> unless reaching EOF.
+	 */
+	public CompletableFuture<Long> transferTo(long position, long count, WritableByteChannel dst) {
+		return transferTo(position, count, dst,0l);
+	}
+
+	private CompletableFuture<Long> transferTo(long position, long count, WritableByteChannel dst, long totalTransferred) {
+		Preconditions.checkArgument(position >= 0);
+		Preconditions.checkArgument(count > 0);
+		Preconditions.checkArgument(totalTransferred >= 0);
+		ByteBuffer buffer = ByteBuffer.allocate(BUFFER_SIZE);
+		return read(buffer, position).thenCompose(read -> {
+			if (read == -1) {
+				return CompletableFuture.completedFuture(totalTransferred);
+			}
+			buffer.flip();
+			int written = 0;
+			try {
+				while (buffer.hasRemaining()) {
+					written += dst.write(buffer);
+				}
+			} catch (IOException e) {
+				return CompletableFuture.failedFuture(e);
+			}
+			assert written == read;
+			if (written == count // DONE, transferred requested number of bytes
+					|| read < buffer.capacity()) { // EOF
+				return CompletableFuture.completedFuture(totalTransferred + written);
+			} else { // CONTINUE, further bytes to be transferred
+				assert written < count;
+				assert read == buffer.capacity();
+				return this.transferTo(position + written, count - written, dst,totalTransferred + written);
+			}
+		});
 	}
 
 	public CompletableFuture<Integer> read(ByteBuffer dst, long position) {

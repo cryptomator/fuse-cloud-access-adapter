@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.CompletionHandler;
+import java.nio.channels.WritableByteChannel;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -229,6 +230,126 @@ public class CompletableAsynchronousFileChannelTest {
 			Mockito.doReturn(CompletableFuture.completedFuture(2 * 1024 * 1024)).when(completableFc).writeAll(Mockito.any(), Mockito.eq(4l * 1024 * 1024));
 
 			var futureResult = completableFc.transferFrom(in, 0l, 6l * 1024 * 1024);
+			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
+
+			Assertions.assertEquals(6 * 1024 * 1024, result);
+		}
+
+	}
+
+	@Nested
+	@DisplayName("transferTo(...)")
+	public class TransferTo {
+
+		private WritableByteChannel dst;
+
+		@BeforeEach
+		public void setup() throws IOException {
+			completableFc = Mockito.spy(completableFc);
+			this.dst = Mockito.mock(WritableByteChannel.class);
+			Mockito.doAnswer(invocation -> {
+				ByteBuffer buffer = invocation.getArgument(0);
+				int n = buffer.remaining();
+				buffer.position(buffer.limit());
+				return n;
+			}).when(dst).write(Mockito.any());
+		}
+
+		@Test
+		@DisplayName("exception during read(...)")
+		public void transferToFails1() {
+			var e = new IOException("fail");
+			Mockito.doReturn(CompletableFuture.failedFuture(e)).when(completableFc).read(Mockito.any(), Mockito.anyLong());
+
+			var futureResult = completableFc.transferTo(42l, 100l, dst);
+			var thrown = Assertions.assertThrows(ExecutionException.class, () -> {
+				Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
+			});
+
+			Assertions.assertEquals(e, thrown.getCause());
+		}
+
+		@Test
+		@DisplayName("exception during dst.write(...)")
+		public void transferToFails2() throws IOException {
+			var e = new IOException("fail");
+			Mockito.doAnswer(invocation -> {
+				ByteBuffer buffer = invocation.getArgument(0);
+				buffer.put(new byte[100]);
+				return CompletableFuture.completedFuture(100);
+			}).when(completableFc).read(Mockito.any(), Mockito.eq(42l));
+			Mockito.doThrow(e).when(dst).write(Mockito.any());
+
+
+			var futureResult = completableFc.transferTo(42l, 100l, dst);
+			var thrown = Assertions.assertThrows(ExecutionException.class, () -> {
+				Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
+			});
+
+			Assertions.assertEquals(e, thrown.getCause());
+		}
+
+		@Test
+		@DisplayName("instant EOF")
+		public void transferToEOF1() {
+			Mockito.doReturn(CompletableFuture.completedFuture(-1)).when(completableFc).read(Mockito.any(), Mockito.anyLong());
+
+			var futureResult = completableFc.transferTo(42l, 100l, dst);
+			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
+
+			Assertions.assertEquals(0, result);
+		}
+
+		@Test
+		@DisplayName("EOF on first iteration")
+		public void transferToEOF2() {
+			Mockito.doAnswer(invocation -> {
+				ByteBuffer buffer = invocation.getArgument(0);
+				buffer.put(new byte[80]);
+				return CompletableFuture.completedFuture(80);
+			}).when(completableFc).read(Mockito.any(), Mockito.eq(42l));
+
+			var futureResult = completableFc.transferTo(42l, 100l, dst);
+			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
+
+			Assertions.assertEquals(80, result);
+		}
+
+		@Test
+		@DisplayName("EOF in second iteration")
+		public void transferFromEOF3() {
+			Mockito.doAnswer(invocation -> {
+				ByteBuffer buffer = invocation.getArgument(0);
+				buffer.put(new byte[4 * 1024 * 1024]);
+				return CompletableFuture.completedFuture(4 * 1024 * 1024);
+			}).when(completableFc).read(Mockito.any(), Mockito.eq(0l));
+			Mockito.doAnswer(invocation -> {
+				ByteBuffer buffer = invocation.getArgument(0);
+				buffer.put(new byte[1 * 1024 * 1024]);
+				return CompletableFuture.completedFuture(1 * 1024 * 1024);
+			}).when(completableFc).read(Mockito.any(), Mockito.eq(4l * 1024 * 1024));
+
+			var futureResult = completableFc.transferTo(0l, 6l * 1024 * 1024, dst);
+			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
+
+			Assertions.assertEquals(5 * 1024 * 1024, result);
+		}
+
+		@Test
+		@DisplayName("transfer requested number of bytes in second iteration")
+		public void transferFrom() throws IOException {
+			Mockito.doAnswer(invocation -> {
+				ByteBuffer buffer = invocation.getArgument(0);
+				buffer.put(new byte[4 * 1024 * 1024]);
+				return CompletableFuture.completedFuture(4 * 1024 * 1024);
+			}).when(completableFc).read(Mockito.any(), Mockito.eq(0l));
+			Mockito.doAnswer(invocation -> {
+				ByteBuffer buffer = invocation.getArgument(0);
+				buffer.put(new byte[2 * 1024 * 1024]);
+				return CompletableFuture.completedFuture(2 * 1024 * 1024);
+			}).when(completableFc).read(Mockito.any(), Mockito.eq(4l * 1024 * 1024));
+
+			var futureResult = completableFc.transferTo(0l, 6l * 1024 * 1024, dst);
 			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
 
 			Assertions.assertEquals(6 * 1024 * 1024, result);
