@@ -274,7 +274,9 @@ class OpenFile implements Closeable {
 		assert position == range.lowerEndpoint();
 		var count = range.upperEndpoint() - range.lowerEndpoint();
 		return fc.transferFrom(source, position, count).thenCompose(transferred -> {
-			populatedRanges.add(Range.closedOpen(position, position + transferred));
+			synchronized (populatedRanges) {
+				populatedRanges.add(Range.closedOpen(position, position + transferred));
+			}
 			return mergeDataInternal(missingRanges, source, position + transferred);
 		});
 	}
