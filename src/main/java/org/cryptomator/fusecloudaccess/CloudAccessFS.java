@@ -362,10 +362,8 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		return provider.write(path, false, InputStream.nullInputStream(), 0l, Optional.of(Instant.now()), ProgressListener.NO_PROGRESS_AWARE) //
 				.handle((nullReturn, exception) -> {
 					if (exception == null) {
-						// no exception means: 0-byte file successfully created
 						return createInternalNonExisting(path, mode, fi, modifiedDate);
 					} else if (exception instanceof AlreadyExistsException) {
-						// in case of an already existing file, return null
 						return createInternalExisting(path, mode, fi);
 					} else {
 						return CompletableFuture.<Integer>failedFuture(exception);
