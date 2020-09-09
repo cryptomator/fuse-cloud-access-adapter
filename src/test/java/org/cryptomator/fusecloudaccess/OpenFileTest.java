@@ -65,14 +65,13 @@ public class OpenFileTest {
 
 	@Test
 	@DisplayName("test perstistTo(...)")
-	public void testPersist(@TempDir Path tmpDir) throws IOException, ExecutionException, InterruptedException {
+	public void testPersist(@TempDir Path tmpDir) throws IOException {
 		Path tmpFile = tmpDir.resolve("cache.file");
 		Path persistentFile = tmpDir.resolve("persistent.file");
 
 		try (var cachedFile = OpenFile.create(file, tmpFile, provider, 0, Instant.EPOCH)) {
 			cachedFile.truncate(100l);
-			var persisting = cachedFile.persistTo(persistentFile);
-			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> persisting.toCompletableFuture().get());
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> cachedFile.persistTo(persistentFile).toCompletableFuture().get());
 		}
 
 		Assertions.assertTrue(Files.notExists(tmpFile));
