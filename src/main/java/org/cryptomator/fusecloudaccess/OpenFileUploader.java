@@ -23,6 +23,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.StampedLock;
 import java.util.function.Consumer;
 
 /**
@@ -39,17 +40,19 @@ class OpenFileUploader {
 	private final CloudPath cloudUploadDir;
 	private final ExecutorService executorService;
 	private final ConcurrentMap<CloudPath, Future<?>> tasks;
+	private final StampedLock moveLock;
 
-	public OpenFileUploader(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir) {
-		this(provider, cacheDir, cloudUploadDir, Executors.newSingleThreadExecutor(), new ConcurrentHashMap<>());
+	public OpenFileUploader(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir, StampedLock moveLock) {
+		this(provider, cacheDir, cloudUploadDir, Executors.newSingleThreadExecutor(), new ConcurrentHashMap<>(), moveLock);
 	}
 
-	OpenFileUploader(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir, ExecutorService executorService, ConcurrentMap<CloudPath, Future<?>> tasks) {
+	OpenFileUploader(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir, ExecutorService executorService, ConcurrentMap<CloudPath, Future<?>> tasks, StampedLock moveLock) {
 		this.provider = provider;
 		this.cacheDir = cacheDir;
 		this.cloudUploadDir = cloudUploadDir;
 		this.executorService = executorService;
 		this.tasks = tasks;
+		this.moveLock = moveLock;
 	}
 
 	/**
@@ -69,7 +72,7 @@ class OpenFileUploader {
 			tasks.remove(f.getPath());
 			onFinished.accept(f);
 		};
-		var task = executorService.submit(new ScheduledUpload(provider, file, decoratedOnFinished, cacheDir, cloudUploadDir));
+		var task = executorService.submit(new ScheduledUpload(provider, file, decoratedOnFinished, cacheDir, cloudUploadDir, moveLock));
 		var previousTask = tasks.put(file.getPath(), task);
 		if (previousTask != null) {
 			previousTask.cancel(true);
@@ -108,13 +111,15 @@ class OpenFileUploader {
 		private final Consumer<OpenFile> onFinished;
 		private final Path cacheDir;
 		private final CloudPath cloudUploadDir;
+		private final StampedLock moveLock;
 
-		public ScheduledUpload(CloudProvider provider, OpenFile openFile, Consumer<OpenFile> onFinished, Path cacheDir, CloudPath cloudUploadDir) {
+		public ScheduledUpload(CloudProvider provider, OpenFile openFile, Consumer<OpenFile> onFinished, Path cacheDir, CloudPath cloudUploadDir, StampedLock moveLock) {
 			this.provider = provider;
 			this.openFile = openFile;
 			this.onFinished = onFinished;
 			this.cacheDir = cacheDir;
 			this.cloudUploadDir = cloudUploadDir;
+			this.moveLock = moveLock;
 		}
 
 		@Override
@@ -137,7 +142,9 @@ class OpenFileUploader {
 						})
 						.thenCompose(cloudItemMetadata -> {
 							assert cloudTmpFile.equals(cloudItemMetadata.getPath());
-							return provider.move(cloudTmpFile, openFile.getPath(), true);
+							return CompletionUtils.runLocked(moveLock, () -> {
+								return provider.move(cloudTmpFile, openFile.getPath(), true);
+							});
 						})
 						.toCompletableFuture().get();
 				return null;

@@ -5,7 +5,6 @@ import com.google.common.collect.ImmutableRangeSet;
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
 import com.google.common.collect.TreeRangeSet;
-import com.google.common.io.Closeables;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
@@ -19,7 +18,6 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousFileChannel;
-import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.file.Files;
@@ -30,7 +28,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
 
 import static java.nio.file.StandardOpenOption.*;
 
@@ -44,7 +41,7 @@ class OpenFile implements Closeable {
 	private final CloudProvider provider;
 	private final RangeSet<Long> populatedRanges;
 	private final AtomicInteger openFileHandleCount;
-	private CloudPath path;
+	private volatile CloudPath path;
 	private Instant lastModified;
 	private boolean dirty;
 
@@ -78,15 +75,16 @@ class OpenFile implements Closeable {
 		return new OpenFile(path, new CompletableAsynchronousFileChannel(fc), provider, TreeRangeSet.create(), initialLastModified);
 	}
 
+	public AtomicInteger getOpenFileHandleCount() {
+		return openFileHandleCount;
+	}
+
 	public CloudPath getPath() {
 		return path;
 	}
 
-	AtomicInteger getOpenFileHandleCount() {
-		return openFileHandleCount;
-	}
-
-	public void updatePath(CloudPath newPath) {
+	// protected by "moveLock"
+	public void setPath(CloudPath newPath) {
 		this.path = newPath;
 	}
 

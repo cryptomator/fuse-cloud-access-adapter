@@ -33,6 +33,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.StampedLock;
 import java.util.function.Function;
 
 public class CloudAccessFS extends FuseStubFS implements FuseFS {
@@ -48,12 +49,17 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	private final LockManager lockManager;
 
 	// TODO: use DI instead of constructor madness
-	public CloudAccessFS(CloudProvider provider, Path cacheDir, int timeoutMillis) {
-		this(provider, cacheDir, timeoutMillis, new OpenFileUploader(provider, cacheDir, CloudPath.of("/58a230a40ae05cee64dfc0680d920e1e"))); //TODO: make this adjustable
+	// TODO: no, really. WE NEED DI!!!!
+	public CloudAccessFS(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir, int timeoutMillis) {
+		this(provider, cacheDir, cloudUploadDir, timeoutMillis, new StampedLock());
 	}
 
-	private CloudAccessFS(CloudProvider provider, Path cacheDir, int timeoutMillis, OpenFileUploader openFileUploader) {
-		this(provider, timeoutMillis, openFileUploader, new OpenFileFactory(provider, openFileUploader, cacheDir), new OpenDirFactory(provider), new LockManager());
+	private CloudAccessFS(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir, int timeoutMillis, StampedLock moveLock) {
+		this(provider, cacheDir, timeoutMillis, moveLock, new OpenFileUploader(provider, cacheDir, cloudUploadDir, moveLock));
+	}
+
+	private CloudAccessFS(CloudProvider provider, Path cacheDir, int timeoutMillis, StampedLock moveLock, OpenFileUploader openFileUploader) {
+		this(provider, timeoutMillis, openFileUploader, new OpenFileFactory(provider, openFileUploader, cacheDir, moveLock), new OpenDirFactory(provider), new LockManager());
 	}
 
 	//Visible for testing

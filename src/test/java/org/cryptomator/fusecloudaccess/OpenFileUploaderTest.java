@@ -29,6 +29,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.StampedLock;
 import java.util.function.Consumer;
 
 public class OpenFileUploaderTest {
@@ -38,6 +39,7 @@ public class OpenFileUploaderTest {
 	private CloudPath cloudUploadDir;
 	private ExecutorService executorService;
 	private ConcurrentMap<CloudPath, Future<?>> tasks;
+	private StampedLock moveLock;
 	private OpenFileUploader uploader;
 	private OpenFile file;
 
@@ -47,7 +49,8 @@ public class OpenFileUploaderTest {
 		this.cacheDir = Mockito.mock(Path.class);
 		this.executorService = Mockito.mock(ExecutorService.class);
 		this.tasks = Mockito.mock(ConcurrentMap.class);
-		this.uploader = new OpenFileUploader(provider, cacheDir, cloudUploadDir, executorService, tasks);
+		this.moveLock = Mockito.mock(StampedLock.class);
+		this.uploader = new OpenFileUploader(provider, cacheDir, cloudUploadDir, executorService, tasks, moveLock);
 		this.file = Mockito.mock(OpenFile.class);
 
 		this.cloudUploadDir = CloudPath.of("/upload/path/in/cloud");
@@ -134,7 +137,7 @@ public class OpenFileUploaderTest {
 		@BeforeEach
 		public void setup() {
 			this.executorService = Executors.newSingleThreadExecutor();
-			this.uploader = new OpenFileUploader(provider, cacheDir, cloudUploadDir, executorService, tasks);
+			this.uploader = new OpenFileUploader(provider, cacheDir, cloudUploadDir, executorService, tasks, moveLock);
 		}
 
 		@Test
@@ -192,7 +195,7 @@ public class OpenFileUploaderTest {
 			this.provider = Mockito.mock(CloudProvider.class);
 			this.openFile = Mockito.mock(OpenFile.class);
 			this.onFinished = Mockito.mock(Consumer.class);
-			this.upload = new OpenFileUploader.ScheduledUpload(provider, openFile, onFinished, tmpDir, cloudUploadDir);
+			this.upload = new OpenFileUploader.ScheduledUpload(provider, openFile, onFinished, tmpDir, cloudUploadDir, moveLock);
 		}
 
 		@Test
