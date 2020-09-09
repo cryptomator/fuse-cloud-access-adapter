@@ -19,6 +19,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -64,18 +65,45 @@ public class OpenFileTest {
 
 	@Test
 	@DisplayName("test perstistTo(...)")
-	public void testPersist(@TempDir Path tmpDir) throws IOException {
+	public void testPersist(@TempDir Path tmpDir) throws IOException, ExecutionException, InterruptedException {
 		Path tmpFile = tmpDir.resolve("cache.file");
 		Path persistentFile = tmpDir.resolve("persistent.file");
 
 		try (var cachedFile = OpenFile.create(file, tmpFile, provider, 0, Instant.EPOCH)) {
 			cachedFile.truncate(100l);
-			cachedFile.persistTo(persistentFile);
+			var persisting = cachedFile.persistTo(persistentFile);
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> persisting.toCompletableFuture().get());
 		}
 
 		Assertions.assertTrue(Files.notExists(tmpFile));
 		Assertions.assertTrue(Files.exists(persistentFile));
 		Assertions.assertEquals(100, Files.size(persistentFile));
+	}
+
+	@Test
+	@DisplayName("test closeWhenDone(...) on successful completion")
+	public void testCloseWhenDone1() throws IOException {
+		var closeable = Mockito.mock(Closeable.class);
+		var completable = new CompletableFuture<Integer>();
+
+		var result = openFile.closeWhenDone(closeable, completable);
+		Mockito.verify(closeable, Mockito.never()).close();
+
+		completable.complete(1);
+		Mockito.verify(closeable).close();
+	}
+
+	@Test
+	@DisplayName("test closeWhenDone(...) on exceptional completion")
+	public void testCloseWhenDone2() throws IOException {
+		var closeable = Mockito.mock(Closeable.class);
+		var completable = new CompletableFuture<Integer>();
+
+		var result = openFile.closeWhenDone(closeable, completable);
+		Mockito.verify(closeable, Mockito.never()).close();
+
+		completable.completeExceptionally(new Exception("fail."));
+		Mockito.verify(closeable).close();
 	}
 
 	@Nested

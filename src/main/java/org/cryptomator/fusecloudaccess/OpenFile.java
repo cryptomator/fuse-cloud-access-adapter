@@ -19,6 +19,7 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousFileChannel;
+import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.file.Files;
@@ -122,7 +123,7 @@ class OpenFile implements Closeable {
 
 	public synchronized void close() {
 		try {
-			LOG.info("Closing open file {}", path);
+			LOG.debug("Closing open file {}", path);
 			fc.close();
 		} catch (IOException e) {
 			LOG.error("Failed to close tmp file.", e);
@@ -134,7 +135,7 @@ class OpenFile implements Closeable {
 	 *
 	 * @param buf    Buffer
 	 * @param offset Position of first byte to read
-	 * @param count   Number of bytes to read
+	 * @param count  Number of bytes to read
 	 * @return A CompletionStage either containing the actual number of bytes read (can be less than {@code size} if reached EOF)
 	 * or failing with an {@link IOException}
 	 */
@@ -152,7 +153,7 @@ class OpenFile implements Closeable {
 	 *
 	 * @param buf    Buffer
 	 * @param offset Position of first byte to write
-	 * @param count   Number of bytes to write
+	 * @param count  Number of bytes to write
 	 * @return A CompletionStage either containing the actual number of bytes written or failing with an {@link IOException}
 	 */
 	public int write(Pointer buf, long offset, long count) throws IOException {
@@ -174,7 +175,7 @@ class OpenFile implements Closeable {
 				e.printStackTrace();
 				throw new IOException("Interrupt");
 			} catch (ExecutionException e) {
-				if (e.getCause() instanceof IOException){
+				if (e.getCause() instanceof IOException) {
 					throw (IOException) e.getCause();
 				}
 			}
@@ -230,7 +231,7 @@ class OpenFile implements Closeable {
 		long size = requestedRange.upperEndpoint() - requestedRange.lowerEndpoint();
 		return provider.read(path, offset, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
 			var merged = mergeData(requestedRange, in);
-			return CompletionUtils.runAlways(merged, () -> Closeables.closeQuietly(in));
+			return closeWhenDone(in, merged);
 		});
 	}
 
@@ -326,45 +327,37 @@ class OpenFile implements Closeable {
 	 */
 	public synchronized CompletionStage<Void> persistTo(Path destination) {
 		Preconditions.checkState(fc.isOpen());
-		return load(0, getSize()).thenCompose(ignored -> {
+		long size = getSize();
+		return load(0, size).thenCompose(ignored -> {
+			WritableByteChannel dst;
 			try {
-				fc.force(true);
-				//TODO: research if Files.copy() can be used (AsyncFileChannel does not implement ByteChannel)
-				readCompleteFile(destination);
-				//fc.transferTo(0, fc.size(), dst);
-				return CompletableFuture.completedFuture(null);
-			} catch (InterruptedException | IOException e) {
+				dst = Files.newByteChannel(destination, CREATE_NEW, WRITE);
+			} catch (IOException e) {
 				return CompletableFuture.failedFuture(e);
 			}
+			var result = fc.transferTo(0, size, dst).<Void>thenApply(transferred -> null);
+			return closeWhenDone(dst, result);
 		});
 	}
 
-	void readCompleteFile(Path destination) throws IOException, InterruptedException {
-		try (WritableByteChannel dst = Files.newByteChannel(destination, CREATE_NEW, WRITE)) {
-			long pos = 0;
-			var end = fc.size();
-			var out = ByteBuffer.allocate(BUFFER_SIZE);
-			while (pos < end) {
-				int n = (int) Math.min(BUFFER_SIZE, end - pos); // int-cast: n <= BUFFER_SIZE
-				out.limit(n);
-				try {
-					long read = fc.read(out, pos).get();
-					assert read == out.limit();
-					out.position(0);
-					long written = dst.write(out);
-					pos += written;
-					if (written < n) {
-						break; // EOF
-					}
-				} catch (ExecutionException e) {
-					if (e.getCause() instanceof IOException) {
-						throw (IOException) e.getCause();
-					} else {
-						LOG.warn("Unexpected exception during write to "+path+" appeared.",e);
-						throw new RuntimeException(e); //FIXME: please look for something better
-					}
-				}
-			}
+	/**
+	 * Closes the given <code>closeable</code> as soon as <code>completionStage</code> completes
+	 * either successfully or exceptionally.
+	 *
+	 * @param closeable       The closeaeble to close
+	 * @param completionStage The job to finish
+	 * @return The result of the given <code>completionStage</code>
+	 */
+	// visible for testing
+	<T> CompletionStage<T> closeWhenDone(Closeable closeable, CompletionStage<T> completionStage) {
+		return CompletionUtils.runAlways(completionStage, () -> closeQuietly(closeable));
+	}
+
+	private void closeQuietly(Closeable closeable) {
+		try {
+			closeable.close();
+		} catch (IOException e) {
+			LOG.error("Failed to close stream", e);
 		}
 	}
 }
