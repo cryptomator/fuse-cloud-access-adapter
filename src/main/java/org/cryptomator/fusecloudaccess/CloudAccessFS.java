@@ -49,7 +49,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	// TODO: use DI instead of constructor madness
 	public CloudAccessFS(CloudProvider provider, Path cacheDir, int timeoutMillis) {
-		this(provider, cacheDir, timeoutMillis, new OpenFileUploader(provider, cacheDir));
+		this(provider, cacheDir, timeoutMillis, new OpenFileUploader(provider, cacheDir, CloudPath.of("/58a230a40ae05cee64dfc0680d920e1e"))); //TODO: make this adjustable
 	}
 
 	private CloudAccessFS(CloudProvider provider, Path cacheDir, int timeoutMillis, OpenFileUploader openFileUploader) {

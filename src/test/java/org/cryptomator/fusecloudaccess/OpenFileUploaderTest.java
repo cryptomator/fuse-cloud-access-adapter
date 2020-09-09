@@ -32,6 +32,7 @@ public class OpenFileUploaderTest {
 
 	private CloudProvider provider;
 	private Path cacheDir;
+	private CloudPath cloudUploadDir;
 	private ExecutorService executorService;
 	private ConcurrentMap<CloudPath, Future<?>> tasks;
 	private OpenFileUploader uploader;
@@ -43,8 +44,10 @@ public class OpenFileUploaderTest {
 		this.cacheDir = Mockito.mock(Path.class);
 		this.executorService = Mockito.mock(ExecutorService.class);
 		this.tasks = Mockito.mock(ConcurrentMap.class);
-		this.uploader = new OpenFileUploader(provider, cacheDir, executorService, tasks);
+		this.uploader = new OpenFileUploader(provider, cacheDir, cloudUploadDir, executorService, tasks);
 		this.file = Mockito.mock(OpenFile.class);
+
+		this.cloudUploadDir = CloudPath.of("/upload/path/in/cloud");
 	}
 
 	@Test
@@ -58,6 +61,7 @@ public class OpenFileUploaderTest {
 		Mockito.verify(executorService, Mockito.never()).submit(Mockito.any(Runnable.class));
 		Mockito.verify(tasks, Mockito.never()).put(Mockito.any(), Mockito.any());
 	}
+
 
 	@Test
 	@DisplayName("scheduling modified file (no previous upload)")
@@ -127,7 +131,7 @@ public class OpenFileUploaderTest {
 		@BeforeEach
 		public void setup() {
 			this.executorService = Executors.newSingleThreadExecutor();
-			this.uploader = new OpenFileUploader(provider, cacheDir, executorService, tasks);
+			this.uploader = new OpenFileUploader(provider, cacheDir, cloudUploadDir, executorService, tasks);
 		}
 
 		@Test
@@ -185,7 +189,7 @@ public class OpenFileUploaderTest {
 			this.provider = Mockito.mock(CloudProvider.class);
 			this.openFile = Mockito.mock(OpenFile.class);
 			this.onFinished = Mockito.mock(Consumer.class);
-			this.upload = new OpenFileUploader.ScheduledUpload(provider, openFile, onFinished, tmpDir);
+			this.upload = new OpenFileUploader.ScheduledUpload(provider, openFile, onFinished, tmpDir, cloudUploadDir);
 		}
 
 		@Test
@@ -215,7 +219,7 @@ public class OpenFileUploaderTest {
 				return CompletableFuture.completedFuture(null);
 			});
 			Mockito.when(openFile.getPath()).thenReturn(cloudPath);
-			Mockito.when(provider.write(Mockito.eq(cloudPath), Mockito.eq(true), Mockito.any(), Mockito.eq(42l), Mockito.any()))
+			Mockito.when(provider.write(Mockito.any(), Mockito.eq(true), Mockito.any(), Mockito.eq(42l), Mockito.any()))
 					.thenReturn(CompletableFuture.failedFuture(e));
 
 			var thrown = Assertions.assertThrows(IOException.class, () -> {
@@ -238,8 +242,14 @@ public class OpenFileUploaderTest {
 				return CompletableFuture.completedFuture(null);
 			});
 			Mockito.when(openFile.getPath()).thenReturn(cloudPath);
-			Mockito.when(provider.write(Mockito.eq(cloudPath), Mockito.eq(true), Mockito.any(), Mockito.eq(42l), Mockito.any()))
-					.thenReturn(CompletableFuture.completedFuture(Mockito.mock(CloudItemMetadata.class)));
+			Mockito.when(provider.write(Mockito.any(), Mockito.eq(true), Mockito.any(), Mockito.eq(42l), Mockito.any()))
+					.thenAnswer(invocation -> {
+						var itemMetadata = Mockito.mock(CloudItemMetadata.class);
+						CloudPath inputCloudPath = invocation.getArgument(0);
+						Mockito.when(itemMetadata.getPath()).thenReturn(inputCloudPath);
+						return CompletableFuture.completedFuture(itemMetadata);
+					});
+			Mockito.when(provider.move(Mockito.any(), Mockito.eq(cloudPath), Mockito.eq(true))).thenReturn(CompletableFuture.completedFuture(cloudPath));
 
 			upload.call();
 
