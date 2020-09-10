@@ -24,6 +24,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.StampedLock;
 import java.util.function.Consumer;
 
@@ -126,6 +127,7 @@ class OpenFileUploader {
 			String tmpFileName = UUID.randomUUID() + ".tmp";
 			Path localTmpFile = cacheDir.resolve(tmpFileName);
 			CloudPath cloudTmpFile = cloudUploadDir.resolve(tmpFileName);
+			AtomicLong moveLockStamp = new AtomicLong();
 			try {
 				openFile.persistTo(localTmpFile)
 						.thenCompose((ignored) -> {
@@ -141,9 +143,8 @@ class OpenFileUploader {
 							}
 						})
 						.thenCompose(ignored -> {
-							return CompletionUtils.runLocked(moveLock, () -> {
-								return provider.move(cloudTmpFile, openFile.getPath(), true);
-							});
+							moveLockStamp.set(moveLock.writeLock());
+							return provider.move(cloudTmpFile, openFile.getPath(), true);
 						})
 						.toCompletableFuture().get();
 				return null;
@@ -158,6 +159,9 @@ class OpenFileUploader {
 				// TODO copy file to some lost+found dir
 				throw new IOException("Upload failed.", e);
 			} finally {
+				if (moveLockStamp.get() != 0) {
+					moveLock.unlock(moveLockStamp.get());
+				}
 				Files.deleteIfExists(localTmpFile);
 				onFinished.accept(openFile);
 			}
