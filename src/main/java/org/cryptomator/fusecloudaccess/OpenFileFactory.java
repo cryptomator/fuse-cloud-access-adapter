@@ -25,6 +25,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.StampedLock;
 
 class OpenFileFactory {
 
@@ -43,19 +44,21 @@ class OpenFileFactory {
 	private final OpenFileUploader uploader;
 	private final Path cacheDir;
 	private final ScheduledExecutorService scheduler;
+	private final StampedLock moveLock;
 
-	public OpenFileFactory(CloudProvider provider, OpenFileUploader uploader, Path cacheDir) {
-		this(new ConcurrentHashMap<>(), provider, uploader, cacheDir, Executors.newSingleThreadScheduledExecutor());
+	public OpenFileFactory(CloudProvider provider, OpenFileUploader uploader, Path cacheDir, StampedLock moveLock) {
+		this(new ConcurrentHashMap<>(), provider, uploader, cacheDir, Executors.newSingleThreadScheduledExecutor(), moveLock);
 	}
 
 	// visible for testing
-	OpenFileFactory(ConcurrentMap<CloudPath, OpenFile> activeFiles, CloudProvider provider, OpenFileUploader uploader, Path cacheDir, ScheduledExecutorService scheduler) {
+	OpenFileFactory(ConcurrentMap<CloudPath, OpenFile> activeFiles, CloudProvider provider, OpenFileUploader uploader, Path cacheDir, ScheduledExecutorService scheduler, StampedLock moveLock) {
 		this.activeFiles = activeFiles;
 		this.fileHandles = new HashMap<>();
 		this.provider = provider;
 		this.uploader = uploader;
 		this.cacheDir = cacheDir;
 		this.scheduler = scheduler;
+		this.moveLock = moveLock;
 	}
 
 	/**
@@ -111,9 +114,8 @@ class OpenFileFactory {
 	 * @param oldPath Path to a cached file before it has been moved
 	 * @param newPath New path which is used to access the cached file
 	 */
-	public synchronized void move(CloudPath oldPath, CloudPath newPath) {
+	public void move(CloudPath oldPath, CloudPath newPath) {
 		Preconditions.checkArgument(!oldPath.equals(newPath));
-		var wasUploading = uploader.cancelUpload(oldPath);
 		uploader.cancelUpload(newPath);
 		var activeFile = activeFiles.remove(oldPath);
 		activeFiles.compute(newPath, (p, previouslyActiveFile) -> {
@@ -122,9 +124,11 @@ class OpenFileFactory {
 				previouslyActiveFile.close();
 			}
 			if (activeFile != null) {
-				activeFile.updatePath(newPath);
-				if (wasUploading) {
-					uploader.scheduleUpload(activeFile, this::onFinishedUpload);
+				var stamp = moveLock.writeLock();
+				try {
+					activeFile.setPath(newPath);
+				} finally {
+					moveLock.unlock(stamp);
 				}
 			}
 			return activeFile;
@@ -187,6 +191,7 @@ class OpenFileFactory {
 	/**
 	 * Returns metadata from cache. This is not threadsafe and the returned metadata might refer to an
 	 * file that got evicted just in this moment.
+	 *
 	 * @param path
 	 * @return Optional metadata, which is present if cached
 	 */

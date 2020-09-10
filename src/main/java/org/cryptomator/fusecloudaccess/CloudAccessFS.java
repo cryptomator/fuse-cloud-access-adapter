@@ -34,6 +34,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.StampedLock;
 import java.util.function.Function;
 
 public class CloudAccessFS extends FuseStubFS implements FuseFS {
@@ -49,12 +50,17 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	private final LockManager lockManager;
 
 	// TODO: use DI instead of constructor madness
-	public CloudAccessFS(CloudProvider provider, Path cacheDir, int timeoutMillis) {
-		this(provider, cacheDir, timeoutMillis, new OpenFileUploader(provider, cacheDir));
+	// TODO: no, really. WE NEED DI!!!!
+	public CloudAccessFS(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir, int timeoutMillis) {
+		this(provider, cacheDir, cloudUploadDir, timeoutMillis, new StampedLock());
 	}
 
-	private CloudAccessFS(CloudProvider provider, Path cacheDir, int timeoutMillis, OpenFileUploader openFileUploader) {
-		this(provider, timeoutMillis, openFileUploader, new OpenFileFactory(provider, openFileUploader, cacheDir), new OpenDirFactory(provider), new LockManager());
+	private CloudAccessFS(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir, int timeoutMillis, StampedLock moveLock) {
+		this(provider, cacheDir, timeoutMillis, moveLock, new OpenFileUploader(provider, cacheDir, cloudUploadDir, moveLock));
+	}
+
+	private CloudAccessFS(CloudProvider provider, Path cacheDir, int timeoutMillis, StampedLock moveLock, OpenFileUploader openFileUploader) {
+		this(provider, timeoutMillis, openFileUploader, new OpenFileFactory(provider, openFileUploader, cacheDir, moveLock), new OpenDirFactory(provider), new LockManager());
 	}
 
 	//Visible for testing
@@ -488,20 +494,28 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	public int write(String path, Pointer buf, long size, long offset, FuseFileInfo fi) {
 		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
+			var returnCode =  writeInternal(fi.fh.get(), buf, size, offset);
 			LOG.trace("write {} (handle: {}, size: {}, offset: {})", path, fi.fh.get(), size, offset);
-			return writeInternal(fi.fh.get(), buf, size, offset);
+			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("write() failed", e);
 			return -ErrorCodes.EIO();
 		}
 	}
 
-	private int writeInternal(long fileHandle, Pointer buf, long size, long offset) throws IOException {
+	private CompletableFuture<Integer> writeInternal(long fileHandle, Pointer buf, long size, long offset) {
 		var openFile = openFileFactory.get(fileHandle);
 		if (openFile.isEmpty()) {
-			return -ErrorCodes.EBADF();
+			return CompletableFuture.completedFuture(-ErrorCodes.EBADF());
 		}
-		return openFile.get().write(buf, offset, size);
+		return openFile.get().write(buf, offset, size).exceptionally(e -> {
+			if (e instanceof NotFoundException) {
+				return -ErrorCodes.ENOENT();
+			} else {
+				LOG.error("write() failed", e);
+				return -ErrorCodes.EIO();
+			}
+		});
 	}
 
 	@Override

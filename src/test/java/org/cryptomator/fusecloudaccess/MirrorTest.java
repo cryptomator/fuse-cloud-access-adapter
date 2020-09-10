@@ -8,6 +8,7 @@ import java.util.Scanner;
 import java.util.UUID;
 
 import com.google.common.base.Preconditions;
+import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.localfs.LocalFsCloudProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,7 +37,7 @@ public class MirrorTest {
 				Path m = Path.of("/Volumes/" + UUID.randomUUID().toString());
 				Path c = Files.createTempDirectory("cache");
 				var cloudAccessProvider = new LocalFsCloudProvider(p);
-				var fs = new CloudAccessFS(cloudAccessProvider, c, 1000);
+				var fs = new CloudAccessFS(cloudAccessProvider, c, CloudPath.of("/"), 1000);
 				var flags = new String[] {
 						"-ouid=" + Files.getAttribute(USER_HOME, "unix:uid"),
 						"-ogid=" + Files.getAttribute(USER_HOME, "unix:gid"),
@@ -70,7 +71,7 @@ public class MirrorTest {
 				Path m = Paths.get(scanner.nextLine());
 				Path c = Files.createTempDirectory("cache");
 				var cloudAccessProvider = new LocalFsCloudProvider(p);
-				var fs = new CloudAccessFS(cloudAccessProvider, c, 1000);
+				var fs = new CloudAccessFS(cloudAccessProvider, c, CloudPath.of("/"), 1000);
 				var flags = new String[] {
 						"-ouid=-1",
 						"-ogid=-1",

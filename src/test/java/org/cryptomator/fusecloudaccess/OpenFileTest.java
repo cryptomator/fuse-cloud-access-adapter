@@ -19,11 +19,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
-import java.nio.channels.WritableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -37,7 +36,7 @@ public class OpenFileTest {
 
 	private CloudPath file;
 	private CloudProvider provider;
-	private FileChannel fileChannel;
+	private CompletableAsynchronousFileChannel fileChannel;
 	private OpenFile openFile;
 	private RangeSet<Long> populatedRanges;
 
@@ -45,7 +44,7 @@ public class OpenFileTest {
 	public void setup() throws IOException {
 		this.file = Mockito.mock(CloudPath.class, "/path/to/file");
 		this.provider = Mockito.mock(CloudProvider.class);
-		this.fileChannel = Mockito.mock(FileChannel.class);
+		this.fileChannel = Mockito.mock(CompletableAsynchronousFileChannel.class);
 		this.populatedRanges = Mockito.mock(RangeSet.class);
 		this.openFile = new OpenFile(file, fileChannel, provider, populatedRanges, Instant.EPOCH);
 		Mockito.when(fileChannel.size()).thenReturn(100l);
@@ -72,12 +71,38 @@ public class OpenFileTest {
 
 		try (var cachedFile = OpenFile.create(file, tmpFile, provider, 0, Instant.EPOCH)) {
 			cachedFile.truncate(100l);
-			cachedFile.persistTo(persistentFile);
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> cachedFile.persistTo(persistentFile).toCompletableFuture().get());
 		}
 
 		Assertions.assertTrue(Files.notExists(tmpFile));
 		Assertions.assertTrue(Files.exists(persistentFile));
 		Assertions.assertEquals(100, Files.size(persistentFile));
+	}
+
+	@Test
+	@DisplayName("test closeWhenDone(...) on successful completion")
+	public void testCloseWhenDone1() throws IOException {
+		var closeable = Mockito.mock(Closeable.class);
+		var completable = new CompletableFuture<Integer>();
+
+		var result = openFile.closeWhenDone(closeable, completable);
+		Mockito.verify(closeable, Mockito.never()).close();
+
+		completable.complete(1);
+		Mockito.verify(closeable).close();
+	}
+
+	@Test
+	@DisplayName("test closeWhenDone(...) on exceptional completion")
+	public void testCloseWhenDone2() throws IOException {
+		var closeable = Mockito.mock(Closeable.class);
+		var completable = new CompletableFuture<Integer>();
+
+		var result = openFile.closeWhenDone(closeable, completable);
+		Mockito.verify(closeable, Mockito.never()).close();
+
+		completable.completeExceptionally(new Exception("fail."));
+		Mockito.verify(closeable).close();
 	}
 
 	@Nested
@@ -86,49 +111,37 @@ public class OpenFileTest {
 
 		@DisplayName("fail due to I/O error")
 		@Test
-		public void testWriteFailsWithException() throws IOException {
+		public void testWriteFailsWithException() {
 			var e = new IOException("fail");
+			CompletableFuture<Integer> failedFuture = CompletableFuture.failedFuture(e);
 			var buf = Mockito.mock(Pointer.class);
-			Mockito.when(fileChannel.write(Mockito.any(), Mockito.anyLong())).thenThrow(e);
+			Mockito.when(fileChannel.writeFromPointer(buf, 1000l, 42l)).thenReturn(failedFuture);
 
-			var thrown = Assertions.assertThrows(IOException.class, () -> {
-				openFile.write(buf, 1000l, 42l);
+			var futureResult = openFile.write(buf, 1000l, 42l);
+			var thrown = Assertions.assertThrows(ExecutionException.class, () -> {
+				Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 			});
 
-			Assertions.assertEquals(e, thrown);
+			Assertions.assertEquals(e, thrown.getCause());
 		}
 
 		@DisplayName("successful write")
 		@ParameterizedTest(name = "write(buf, 1000, {0})")
 		@ValueSource(ints = {0, 100, 1023, 1024, 1025, 10_000})
-		public void testWrite(int n) throws IOException {
-			var content = new byte[n];
-			var written = new byte[n];
+		public void testWrite(int n) {
+			Assumptions.assumeTrue(openFile.getSize() == 100l);
 			var buf = Mockito.mock(Pointer.class);
-			new Random(42l).nextBytes(content);
-			Mockito.doAnswer(invocation -> {
-				long offset = invocation.getArgument(0);
-				byte[] dst = invocation.getArgument(1);
-				int idx = invocation.getArgument(2);
-				int len = invocation.getArgument(3);
-				System.arraycopy(content, (int) offset, dst, idx, len);
-				return null;
-			}).when(buf).get(Mockito.anyLong(), Mockito.any(byte[].class), Mockito.anyInt(), Mockito.anyInt());
-			Mockito.doAnswer(invocation -> {
-				ByteBuffer source = invocation.getArgument(0);
-				long pos = invocation.getArgument(1);
-				int count = source.capacity();
-				source.get(written, (int) pos - 1000, count);
-				return count;
-			}).when(fileChannel).write(Mockito.any(), Mockito.anyLong());
+			Mockito.when(fileChannel.writeFromPointer(buf, 1000l, n)).thenReturn(CompletableFuture.completedFuture(n));
+
 			Assumptions.assumeFalse(openFile.isDirty());
 
-			var result = openFile.write(buf, 1000l, n);
+			var futureResult = openFile.write(buf, 1000l, n);
+			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 			Assertions.assertEquals(n, result);
-			Assertions.assertArrayEquals(content, written);
 			Assertions.assertTrue(openFile.isDirty());
-			Mockito.verify(populatedRanges).add(Range.closedOpen(1000l, 1000l + n));
+			Mockito.verify(populatedRanges).add(Range.closedOpen(100l, 1000l)); // fils is grown from 100 to 1000
+			Mockito.verify(populatedRanges).add(Range.closedOpen(1000l, 1000l + n)); // content of size n gets written starting at 1000
 		}
 
 	}
@@ -163,43 +176,25 @@ public class OpenFileTest {
 		@ParameterizedTest(name = "read(buf, 100, {0})")
 		@ValueSource(ints = {0, 100, 1023, 1024, 1025, 10_000})
 		public void testReadSuccess(int readSize) throws IOException {
-			Mockito.when(fileChannel.size()).thenReturn(100_000l);
 			long readOffset = 100;
-			var content = new byte[readSize];
-			var transferred = new byte[readSize];
 			var buf = Mockito.mock(Pointer.class);
-			var in = Mockito.mock(InputStream.class);
-			new Random(42l).nextBytes(content);
-			Mockito.doAnswer(invocation -> {
-				long pos = invocation.getArgument(0);
-				long count = invocation.getArgument(1);
-				WritableByteChannel target = invocation.getArgument(2);
-				target.write(ByteBuffer.wrap(content, (int) (pos - readOffset), (int) count));
-				return count;
-			}).when(fileChannel).transferTo(Mockito.anyLong(), Mockito.anyLong(), Mockito.any());
-			Mockito.doAnswer(invocation -> {
-				long offset = invocation.getArgument(0);
-				byte[] src = invocation.getArgument(1);
-				int idx = invocation.getArgument(2);
-				int len = invocation.getArgument(3);
-				System.arraycopy(src, idx, transferred, (int) offset, len);
-				return null;
-			}).when(buf).put(Mockito.anyLong(), Mockito.any(byte[].class), Mockito.anyInt(), Mockito.anyInt());
+			Mockito.when(fileChannel.size()).thenReturn(100_000l);
+			Mockito.when(fileChannel.readToPointer(buf, readOffset, readSize)).thenReturn(CompletableFuture.completedFuture(readSize));
 
 			var futureResult = fileSpy.read(buf, readOffset, readSize);
 			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 			Assertions.assertEquals(readSize, result);
 			Assertions.assertFalse(fileSpy.isDirty());
-			Assertions.assertArrayEquals(content, transferred);
-			Mockito.verify(fileSpy).load(readOffset, readSize);
 		}
 
 		@Test
-		@DisplayName("fail due to I/O error in tmp file channel")
-		public void testReadFailure() throws IOException {
+		@DisplayName("fail due to I/O error in readToPointer()")
+		public void testReadFailure() {
 			var e = new IOException();
-			Mockito.when(fileChannel.transferTo(Mockito.anyLong(), Mockito.anyLong(), Mockito.any())).thenThrow(e);
+			CompletableFuture failure = CompletableFuture.failedFuture(e);
+			Mockito.when(fileChannel.readToPointer(Mockito.any(), Mockito.anyLong(), Mockito.anyLong())).thenReturn(failure);
+
 
 			var futureResult = fileSpy.read(Mockito.mock(Pointer.class), 42, 1024);
 			var thrown = Assertions.assertThrows(ExecutionException.class, () -> {
@@ -234,9 +229,9 @@ public class OpenFileTest {
 		OpenFile fileSpy;
 
 		@BeforeEach
-		public void setup() throws IOException {
+		public void setup() {
 			this.fileSpy = Mockito.spy(openFile);
-			Mockito.doNothing().when(fileSpy).mergeData(Mockito.any(), Mockito.any());
+			Mockito.doReturn(CompletableFuture.completedFuture(null)).when(fileSpy).mergeData(Mockito.any(), Mockito.any());
 		}
 
 		@DisplayName("load 0 bytes")
@@ -278,7 +273,7 @@ public class OpenFileTest {
 
 		@Test
 		@DisplayName("region [50, 60] (miss)")
-		public void testLoadNonExisting() throws IOException {
+		public void testLoadNonExisting() {
 			var inputStream = Mockito.mock(InputStream.class);
 			Mockito.when(populatedRanges.encloses(Range.closedOpen(50l, 60l))).thenReturn(false);
 			Mockito.when(provider.read(Mockito.eq(file), Mockito.eq(50l), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(inputStream));
@@ -306,10 +301,10 @@ public class OpenFileTest {
 
 		@Test
 		@DisplayName("region [50, 60] (fail exceptionally due to failed merge)")
-		public void testLoadFailsB() throws IOException {
+		public void testLoadFailsB() {
 			var e = new IOException("fail.");
 			Mockito.when(provider.read(Mockito.eq(file), Mockito.eq(50l), Mockito.anyLong(), Mockito.any())).thenReturn(CompletableFuture.completedFuture(Mockito.mock(InputStream.class)));
-			Mockito.doThrow(e).when(fileSpy).mergeData(Mockito.any(), Mockito.any());
+			Mockito.doReturn(CompletableFuture.failedFuture(e)).when(fileSpy).mergeData(Mockito.any(), Mockito.any());
 
 			var futureResult = fileSpy.load(50, 10);
 			var thrown = Assertions.assertThrows(ExecutionException.class, () -> {
@@ -322,7 +317,7 @@ public class OpenFileTest {
 
 		@Test
 		@DisplayName("region [50, 50] (empty range)")
-		public void testLoadEmptyRange() throws IOException {
+		public void testLoadEmptyRange() {
 			var futureResult = fileSpy.load(50, 0);
 			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
@@ -332,7 +327,7 @@ public class OpenFileTest {
 
 		@Test
 		@DisplayName("region [50, 60] (hit)")
-		public void testLoadCached() throws IOException {
+		public void testLoadCached() {
 			Mockito.when(populatedRanges.encloses(Range.closedOpen(50l, 60l))).thenReturn(true);
 
 			var futureResult = fileSpy.load(50, 10);
@@ -344,7 +339,7 @@ public class OpenFileTest {
 
 		@Test
 		@DisplayName("region [50, 70] (partial hit)")
-		public void testLoadPartiallyCached() throws IOException {
+		public void testLoadPartiallyCached() {
 			var inputStream = Mockito.mock(InputStream.class);
 			Mockito.when(populatedRanges.encloses(Range.closedOpen(50l, 70l))).thenReturn(false);
 			Mockito.when(populatedRanges.asRanges()).thenReturn(Set.of(Range.closedOpen(50l, 60l)));
@@ -406,22 +401,24 @@ public class OpenFileTest {
 	public class Merge {
 
 		private InputStream in = Mockito.mock(InputStream.class);
+		private OpenFile fileSpy;
 
 		@BeforeEach
 		public void setup() {
 			var prePopulatedRanges = ImmutableRangeSet.of(Range.closedOpen(0l, 50l));
 			populatedRanges = Mockito.spy(TreeRangeSet.create(prePopulatedRanges));
 			openFile = new OpenFile(file, fileChannel, provider, populatedRanges, Instant.EPOCH);
+			this.fileSpy = Mockito.spy(openFile);
 		}
 
 		@Test
 		@DisplayName("not intersecting populated ranges")
-		public void testMergeFullRange() throws IOException {
+		public void testMergeFullRange() {
 			var range = Range.closedOpen(100l, 120l);
 			Assumptions.assumeFalse(populatedRanges.encloses(range));
-			Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(100l), Mockito.eq(20l))).thenReturn(20l);
+			Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(100l), Mockito.eq(20l))).thenReturn(CompletableFuture.completedFuture(20l));
 
-			openFile.mergeData(range, in);
+			fileSpy.mergeData(range, in);
 
 			Mockito.verify(populatedRanges).add(Range.closedOpen(100l, 120l));
 			Assertions.assertTrue(populatedRanges.encloses(range));
@@ -433,10 +430,11 @@ public class OpenFileTest {
 			var range = Range.closedOpen(100l, 150l);
 			populatedRanges.add(Range.closedOpen(110l, 120l));
 			Assumptions.assumeFalse(populatedRanges.encloses(range));
-			Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(100l), Mockito.eq(10l))).thenReturn(10l);
-			Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(120l), Mockito.eq(30l))).thenReturn(30l);
+			Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(100l), Mockito.eq(10l))).thenReturn(CompletableFuture.completedFuture(10l));
+			Mockito.when(in.skip(10l)).thenReturn(10l);
+			Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(120l), Mockito.eq(30l))).thenReturn(CompletableFuture.completedFuture(30l));
 
-			openFile.mergeData(range, in);
+			fileSpy.mergeData(range, in);
 
 			Mockito.verify(populatedRanges).add(Range.closedOpen(100l, 110l));
 			Mockito.verify(populatedRanges).add(Range.closedOpen(120l, 150l));
@@ -448,9 +446,10 @@ public class OpenFileTest {
 		public void testMergePartiallyPopulatedRange2() throws IOException {
 			var range = Range.closedOpen(0l, 100l);
 			Assumptions.assumeFalse(populatedRanges.encloses(range));
-			Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(50l), Mockito.eq(50l))).thenReturn(50l);
+			Mockito.when(in.skip(50l)).thenReturn(50l);
+			Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(50l), Mockito.eq(50l))).thenReturn(CompletableFuture.completedFuture(50l));
 
-			openFile.mergeData(range, in);
+			fileSpy.mergeData(range, in);
 
 			Mockito.verify(populatedRanges).add(Range.closedOpen(50l, 100l));
 			Assertions.assertTrue(populatedRanges.encloses(range));
@@ -458,11 +457,11 @@ public class OpenFileTest {
 
 		@Test
 		@DisplayName("fully populated")
-		public void testMergeFullyPopulatedRange() throws IOException {
+		public void testMergeFullyPopulatedRange() {
 			var range = Range.closedOpen(10l, 20l);
 			Assumptions.assumeTrue(populatedRanges.encloses(range));
 
-			openFile.mergeData(range, in);
+			fileSpy.mergeData(range, in);
 
 			Mockito.verify(populatedRanges, Mockito.never()).add(Mockito.any());
 			Assertions.assertTrue(populatedRanges.encloses(range));
@@ -470,12 +469,12 @@ public class OpenFileTest {
 
 		@Test
 		@DisplayName("reaching EOF")
-		public void testMergeWithEOF() throws IOException {
+		public void testMergeWithEOF() {
 			var range = Range.closedOpen(100l, 120l);
 			Assumptions.assumeFalse(populatedRanges.encloses(range));
-			Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(100l), Mockito.eq(20l))).thenReturn(10l);
+			Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(100l), Mockito.eq(20l))).thenReturn(CompletableFuture.completedFuture(10l));
 
-			openFile.mergeData(range, in);
+			fileSpy.mergeData(range, in);
 
 			Mockito.verify(populatedRanges).add(Range.closedOpen(100l, 110l));
 			Assertions.assertFalse(populatedRanges.encloses(range));
@@ -484,11 +483,11 @@ public class OpenFileTest {
 
 		@Test
 		@DisplayName("empty range")
-		public void testMergeEmptyRange() throws IOException {
+		public void testMergeEmptyRange() {
 			var range = Range.closedOpen(100l, 100l);
 			Assumptions.assumeTrue(range.isEmpty());
 
-			openFile.mergeData(Range.closedOpen(100l, 100l), in);
+			fileSpy.mergeData(Range.closedOpen(100l, 100l), in);
 
 			Mockito.verify(populatedRanges, Mockito.never()).add(Mockito.any());
 		}
