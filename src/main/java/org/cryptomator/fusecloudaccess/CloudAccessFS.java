@@ -1,6 +1,5 @@
 package org.cryptomator.fusecloudaccess;
 
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
@@ -24,6 +23,7 @@ import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 import ru.serce.jnrfuse.struct.Statvfs;
 
+import javax.inject.Inject;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
@@ -33,19 +33,15 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.locks.StampedLock;
 import java.util.function.Function;
 
+@FileSystemScoped
 public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	private static final Logger LOG = LoggerFactory.getLogger(CloudAccessFS.class);
-	private static final ThreadFactory SCHEDULER_THREAD_FACTORY = new ThreadFactoryBuilder().setDaemon(false).setNameFormat("scheduler-%d").build();
 	private static final int BLOCKSIZE = 4096;
 
 	private final CloudProvider provider;
@@ -56,21 +52,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	private final OpenDirFactory openDirFactory;
 	private final LockManager lockManager;
 
-	// TODO: use DI instead of constructor madness
-	// TODO: no, really. WE NEED DI!!!!
-	public CloudAccessFS(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir, int timeoutMillis) {
-		this(provider, cacheDir, cloudUploadDir, timeoutMillis, new StampedLock());
-	}
-
-	private CloudAccessFS(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir, int timeoutMillis, StampedLock moveLock) {
-		this(provider, cacheDir, timeoutMillis, Executors.newSingleThreadScheduledExecutor(SCHEDULER_THREAD_FACTORY), moveLock, new OpenFileUploader(provider, cacheDir, cloudUploadDir, moveLock));
-	}
-
-	private CloudAccessFS(CloudProvider provider, Path cacheDir, int timeoutMillis, ScheduledExecutorService scheduler, StampedLock moveLock, OpenFileUploader openFileUploader) {
-		this(provider, timeoutMillis, scheduler, openFileUploader, new OpenFileFactory(provider, openFileUploader, cacheDir, scheduler, moveLock), new OpenDirFactory(provider), new LockManager());
-	}
-
-	//Visible for testing
+	@Inject
 	CloudAccessFS(CloudProvider provider, int timeoutMillis, ScheduledExecutorService scheduler, OpenFileUploader openFileUploader, OpenFileFactory openFileFactory, OpenDirFactory openDirFactory, LockManager lockManager) {
 		this.provider = provider;
 		this.timeoutMillis = timeoutMillis;
@@ -79,6 +61,16 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		this.openFileFactory = openFileFactory;
 		this.openDirFactory = openDirFactory;
 		this.lockManager = lockManager;
+	}
+
+	public static CloudAccessFS createNewFileSystem(CloudProvider provider, int timeoutMillis, Path cacheDir, CloudPath uploadDir) {
+		return DaggerCloudAccessFSComponent.builder()
+				.cloudProvider(provider)
+				.timeoutInMillis(timeoutMillis)
+				.cacheDir(cacheDir)
+				.uploadDir(uploadDir)
+				.build()
+				.filesystem();
 	}
 
 	/**
@@ -502,7 +494,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	public int write(String path, Pointer buf, long size, long offset, FuseFileInfo fi) {
 		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
-			var returnCode =  writeInternal(fi.fh.get(), buf, size, offset);
+			var returnCode = writeInternal(fi.fh.get(), buf, size, offset);
 			LOG.trace("write {} (handle: {}, size: {}, offset: {})", path, fi.fh.get(), size, offset);
 			return returnOrTimeout(returnCode);
 		} catch (Exception e) {

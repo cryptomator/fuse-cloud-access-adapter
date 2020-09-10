@@ -7,6 +7,8 @@ import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.inject.Inject;
+import javax.inject.Named;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.file.Files;
@@ -16,11 +18,9 @@ import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -32,6 +32,7 @@ import java.util.function.Consumer;
  * <p>
  * It should be ensured, that the files which are currently processed are not modified by other thread or processes.
  */
+@FileSystemScoped
 class OpenFileUploader {
 
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFileUploader.class);
@@ -43,11 +44,8 @@ class OpenFileUploader {
 	private final ConcurrentMap<CloudPath, Future<?>> tasks;
 	private final StampedLock moveLock;
 
-	public OpenFileUploader(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir, StampedLock moveLock) {
-		this(provider, cacheDir, cloudUploadDir, Executors.newSingleThreadExecutor(), new ConcurrentHashMap<>(), moveLock);
-	}
-
-	OpenFileUploader(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir, ExecutorService executorService, ConcurrentMap<CloudPath, Future<?>> tasks, StampedLock moveLock) {
+	@Inject
+	OpenFileUploader(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir, ExecutorService executorService, @Named("uploadTasks") ConcurrentMap<CloudPath, Future<?>> tasks, StampedLock moveLock) {
 		this.provider = provider;
 		this.cacheDir = cacheDir;
 		this.cloudUploadDir = cloudUploadDir;

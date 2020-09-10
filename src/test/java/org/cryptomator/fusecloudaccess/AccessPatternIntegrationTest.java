@@ -48,7 +48,7 @@ public class AccessPatternIntegrationTest {
 		Files.createDirectory(this.mirrored);
 		Files.createDirectory(this.cacheDir);
 		this.provider = CloudAccess.toLocalFileSystem(this.mirrored);
-		this.fs = new CloudAccessFS(provider, this.cacheDir, CloudPath.of("/"), 1000);
+		this.fs = CloudAccessFS.createNewFileSystem(provider, 1000, this.cacheDir, CloudPath.of("/"));
 	}
 
 	@Test
@@ -221,7 +221,7 @@ public class AccessPatternIntegrationTest {
 	@DisplayName("simulates \"get attributes during write\" access pattern")
 	void testGetAttributesDuringWrite() {
 		provider = CloudAccess.vaultFormat8GCMCloudAccess(CloudAccess.toLocalFileSystem(this.mirrored), CloudPath.of("/"), Base64.getDecoder().decode("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="));
-		fs = new CloudAccessFS(provider, this.cacheDir, CloudPath.of("/"), 1000);
+		fs = CloudAccessFS.createNewFileSystem(provider, 1000, this.cacheDir, CloudPath.of("/"));
 
 		var path = "/foo.txt";
 
