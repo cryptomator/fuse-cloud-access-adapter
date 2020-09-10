@@ -12,18 +12,18 @@ import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.Channels;
+import java.nio.channels.AsynchronousFileChannel;
 import java.nio.channels.FileChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Iterator;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -33,19 +33,19 @@ import static java.nio.file.StandardOpenOption.*;
 class OpenFile implements Closeable {
 
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFile.class);
-	private static final int BUFFER_SIZE = 1024; // 1 kiB
 	private static final int READAHEAD_SIZE = 1024 * 1024; // 1 MiB
 
-	private final FileChannel fc;
+	private final CompletableAsynchronousFileChannel fc;
 	private final CloudProvider provider;
 	private final RangeSet<Long> populatedRanges;
 	private final AtomicInteger openFileHandleCount;
-	private CloudPath path;
+	private volatile CloudPath path;
 	private Instant lastModified;
 	private boolean dirty;
 
+
 	// visible for testing
-	OpenFile(CloudPath path, FileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified) {
+	OpenFile(CloudPath path, CompletableAsynchronousFileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified) {
 		this.path = path;
 		this.fc = fc;
 		this.provider = provider;
@@ -66,22 +66,23 @@ class OpenFile implements Closeable {
 	 * @throws IOException I/O errors during creation of the cache file located at <code>tmpFilePath</code>
 	 */
 	public static OpenFile create(CloudPath path, Path tmpFilePath, CloudProvider provider, long initialSize, Instant initialLastModified) throws IOException {
-		var fc = FileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE, DELETE_ON_CLOSE);
+		var fc = AsynchronousFileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE, DELETE_ON_CLOSE);
 		if (initialSize > 0) {
 			fc.write(ByteBuffer.allocateDirect(1), initialSize - 1); // grow file to initialSize
 		}
-		return new OpenFile(path, fc, provider, TreeRangeSet.create(), initialLastModified);
+		return new OpenFile(path, new CompletableAsynchronousFileChannel(fc), provider, TreeRangeSet.create(), initialLastModified);
+	}
+
+	public AtomicInteger getOpenFileHandleCount() {
+		return openFileHandleCount;
 	}
 
 	public CloudPath getPath() {
 		return path;
 	}
 
-	AtomicInteger getOpenFileHandleCount() {
-		return openFileHandleCount;
-	}
-
-	public void updatePath(CloudPath newPath) {
+	// protected by "moveLock"
+	public void setPath(CloudPath newPath) {
 		this.path = newPath;
 	}
 
@@ -118,7 +119,7 @@ class OpenFile implements Closeable {
 
 	public synchronized void close() {
 		try {
-			LOG.info("Closing open file {}", path);
+			LOG.debug("Closing open file {}", path);
 			fc.close();
 		} catch (IOException e) {
 			LOG.error("Failed to close tmp file.", e);
@@ -130,7 +131,7 @@ class OpenFile implements Closeable {
 	 *
 	 * @param buf    Buffer
 	 * @param offset Position of first byte to read
-	 * @param count   Number of bytes to read
+	 * @param count  Number of bytes to read
 	 * @return A CompletionStage either containing the actual number of bytes read (can be less than {@code size} if reached EOF)
 	 * or failing with an {@link IOException}
 	 */
@@ -140,26 +141,7 @@ class OpenFile implements Closeable {
 			// reads starting beyond EOF are no-op
 			return CompletableFuture.completedFuture(0);
 		}
-		return load(offset, count).thenCompose(ignored -> {
-			try {
-				long pos = offset;
-				while (pos < offset + count) {
-					int n = (int) Math.min(BUFFER_SIZE, count - (pos - offset)); // int-cast: n <= BUFFER_SIZE
-					var out = new ByteArrayOutputStream();
-					long transferred = fc.transferTo(pos, n, Channels.newChannel(out));
-					assert transferred == out.size();
-					buf.put(pos - offset, out.toByteArray(), 0, out.size());
-					pos += transferred;
-					if (transferred < n) {
-						break; // EOF
-					}
-				}
-				int totalRead = (int) (pos - offset); // TODO: can we return long?
-				return CompletableFuture.completedFuture(totalRead);
-			} catch (IOException e) {
-				return CompletableFuture.failedFuture(e);
-			}
-		});
+		return load(offset, count).thenCompose(ignored -> fc.readToPointer(buf, offset, count));
 	}
 
 	/**
@@ -167,27 +149,20 @@ class OpenFile implements Closeable {
 	 *
 	 * @param buf    Buffer
 	 * @param offset Position of first byte to write
-	 * @param count   Number of bytes to write
+	 * @param count  Number of bytes to write
 	 * @return A CompletionStage either containing the actual number of bytes written or failing with an {@link IOException}
 	 */
-	public int write(Pointer buf, long offset, long count) throws IOException {
+	public CompletableFuture<Integer> write(Pointer buf, long offset, long count) {
 		Preconditions.checkState(fc.isOpen());
-		assert count < Integer.MAX_VALUE; // technically an unsigned integer in the c header file
 		setDirty(true);
 		setLastModified(Instant.now());
 		markPopulatedIfGrowing(offset);
-		long pos = offset;
-		while (pos < offset + count) {
-			int n = (int) Math.min(BUFFER_SIZE, count - (pos - offset)); // int-cast: n <= BUFFER_SIZE
-			byte[] tmp = new byte[n];
-			buf.get(pos - offset, tmp, 0, n);
-			pos += fc.write(ByteBuffer.wrap(tmp), pos);
-		}
-		int written = (int) (pos - offset); // int-cast: result <= size
-		synchronized (populatedRanges) {
-			populatedRanges.add(Range.closedOpen(offset, offset + written));
-		}
-		return written;
+		return fc.writeFromPointer(buf, offset, count).thenApply(written -> {
+			synchronized (populatedRanges) {
+				populatedRanges.add(Range.closedOpen(offset, offset + written));
+			}
+			return written;
+		});
 	}
 
 	/**
@@ -232,13 +207,9 @@ class OpenFile implements Closeable {
 		assert !populatedRanges.intersects(requestedRange); // synchronized by caller
 		long offset = requestedRange.lowerEndpoint();
 		long size = requestedRange.upperEndpoint() - requestedRange.lowerEndpoint();
-		return provider.read(path, offset, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(inputStream -> {
-			try (var in = inputStream) {
-				mergeData(requestedRange, in);
-				return CompletableFuture.completedFuture(null);
-			} catch (IOException e) {
-				return CompletableFuture.failedFuture(e);
-			}
+		return provider.read(path, offset, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
+			var merged = mergeData(requestedRange, in);
+			return closeWhenDone(in, merged);
 		});
 	}
 
@@ -251,23 +222,41 @@ class OpenFile implements Closeable {
 	 *
 	 * @param range  Where to place the data within the file channel
 	 * @param source The data source
-	 * @throws IOException
+	 * @return
 	 */
 	// visible for testing
-	void mergeData(Range<Long> range, InputStream source) throws IOException {
+	CompletableFuture<Void> mergeData(Range<Long> range, InputStream source) {
 		synchronized (populatedRanges) {
-			var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges);
-			long idx = range.lowerEndpoint();
-			for (var r : missingRanges.asRanges()) { // known to be sorted ascending
-				long offset = r.lowerEndpoint();
-				long size = r.upperEndpoint() - r.lowerEndpoint();
-				source.skip(offset - idx); // skip bytes between missing ranges (i.e. already populated)
-				long transferred = fc.transferFrom(Channels.newChannel(source), offset, size);
-				var transferredRange = Range.closedOpen(offset, offset + transferred);
-				populatedRanges.add(transferredRange);
-				idx = r.upperEndpoint();
-			}
+			var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges).asRanges().iterator();
+			return mergeDataInternal(missingRanges, source, range.lowerEndpoint());
 		}
+	}
+
+	private CompletableFuture<Void> mergeDataInternal(Iterator<Range<Long>> missingRanges, InputStream source, final long pos) {
+		if (!missingRanges.hasNext()) {
+			return CompletableFuture.completedFuture(null);
+		}
+		var range = missingRanges.next();
+		Preconditions.checkArgument(pos <= range.lowerEndpoint());
+		final long position;
+		if (pos < range.lowerEndpoint()) {
+			try {
+				long skipped = source.skip(range.lowerEndpoint() - pos);
+				position = pos + skipped;
+			} catch (IOException e) {
+				return CompletableFuture.failedFuture(e);
+			}
+		} else {
+			position = pos;
+		}
+		assert position == range.lowerEndpoint();
+		var count = range.upperEndpoint() - range.lowerEndpoint();
+		return fc.transferFrom(source, position, count).thenCompose(transferred -> {
+			synchronized (populatedRanges) {
+				populatedRanges.add(Range.closedOpen(position, position + transferred));
+			}
+			return mergeDataInternal(missingRanges, source, position + transferred);
+		});
 	}
 
 	/**
@@ -318,13 +307,37 @@ class OpenFile implements Closeable {
 	 */
 	public synchronized CompletionStage<Void> persistTo(Path destination) {
 		Preconditions.checkState(fc.isOpen());
-		return load(0, getSize()).thenCompose(ignored -> {
-			try (WritableByteChannel dst = Files.newByteChannel(destination, CREATE_NEW, WRITE)) {
-				fc.transferTo(0, fc.size(), dst);
-				return CompletableFuture.completedFuture(null);
+		long size = getSize();
+		return load(0, size).thenCompose(ignored -> {
+			WritableByteChannel dst;
+			try {
+				dst = Files.newByteChannel(destination, CREATE_NEW, WRITE);
 			} catch (IOException e) {
 				return CompletableFuture.failedFuture(e);
 			}
+			var result = fc.transferTo(0, size, dst).<Void>thenApply(transferred -> null);
+			return closeWhenDone(dst, result);
 		});
+	}
+
+	/**
+	 * Closes the given <code>closeable</code> as soon as <code>completionStage</code> completes
+	 * either successfully or exceptionally.
+	 *
+	 * @param closeable       The closeaeble to close
+	 * @param completionStage The job to finish
+	 * @return The result of the given <code>completionStage</code>
+	 */
+	// visible for testing
+	<T> CompletionStage<T> closeWhenDone(Closeable closeable, CompletionStage<T> completionStage) {
+		return CompletionUtils.runAlways(completionStage, () -> closeQuietly(closeable));
+	}
+
+	private void closeQuietly(Closeable closeable) {
+		try {
+			closeable.close();
+		} catch (IOException e) {
+			LOG.error("Failed to close stream", e);
+		}
 	}
 }

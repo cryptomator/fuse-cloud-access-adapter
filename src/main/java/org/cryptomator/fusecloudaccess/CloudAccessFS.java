@@ -23,6 +23,7 @@ import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 import ru.serce.jnrfuse.struct.Statvfs;
 
+import javax.inject.Inject;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
@@ -32,10 +33,12 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 
+@FileSystemScoped
 public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	private static final Logger LOG = LoggerFactory.getLogger(CloudAccessFS.class);
@@ -43,28 +46,31 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	private final CloudProvider provider;
 	private final int timeoutMillis;
+	private final ScheduledExecutorService scheduler;
 	private final OpenFileUploader openFileUploader;
 	private final OpenFileFactory openFileFactory;
 	private final OpenDirFactory openDirFactory;
 	private final LockManager lockManager;
 
-	// TODO: use DI instead of constructor madness
-	public CloudAccessFS(CloudProvider provider, Path cacheDir, int timeoutMillis) {
-		this(provider, cacheDir, timeoutMillis, new OpenFileUploader(provider, cacheDir));
-	}
-
-	private CloudAccessFS(CloudProvider provider, Path cacheDir, int timeoutMillis, OpenFileUploader openFileUploader) {
-		this(provider, timeoutMillis, openFileUploader, new OpenFileFactory(provider, openFileUploader, cacheDir), new OpenDirFactory(provider), new LockManager());
-	}
-
-	//Visible for testing
-	CloudAccessFS(CloudProvider provider, int timeoutMillis, OpenFileUploader openFileUploader, OpenFileFactory openFileFactory, OpenDirFactory openDirFactory, LockManager lockManager) {
+	@Inject
+	CloudAccessFS(CloudProvider provider, int timeoutMillis, ScheduledExecutorService scheduler, OpenFileUploader openFileUploader, OpenFileFactory openFileFactory, OpenDirFactory openDirFactory, LockManager lockManager) {
 		this.provider = provider;
 		this.timeoutMillis = timeoutMillis;
+		this.scheduler = scheduler;
 		this.openFileUploader = openFileUploader;
 		this.openFileFactory = openFileFactory;
 		this.openDirFactory = openDirFactory;
 		this.lockManager = lockManager;
+	}
+
+	public static CloudAccessFS createNewFileSystem(CloudProvider provider, int timeoutMillis, Path cacheDir, CloudPath uploadDir) {
+		return DaggerCloudAccessFSComponent.builder()
+				.cloudProvider(provider)
+				.timeoutInMillis(timeoutMillis)
+				.cacheDir(cacheDir)
+				.uploadDir(uploadDir)
+				.build()
+				.filesystem();
 	}
 
 	/**
@@ -362,10 +368,8 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		return provider.write(path, false, InputStream.nullInputStream(), 0l, Optional.of(Instant.now()), ProgressListener.NO_PROGRESS_AWARE) //
 				.handle((nullReturn, exception) -> {
 					if (exception == null) {
-						// no exception means: 0-byte file successfully created
 						return createInternalNonExisting(path, mode, fi, modifiedDate);
 					} else if (exception instanceof AlreadyExistsException) {
-						// in case of an already existing file, return null
 						return createInternalExisting(path, mode, fi);
 					} else {
 						return CompletableFuture.<Integer>failedFuture(exception);
@@ -490,20 +494,28 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	public int write(String path, Pointer buf, long size, long offset, FuseFileInfo fi) {
 		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
+			var returnCode = writeInternal(fi.fh.get(), buf, size, offset);
 			LOG.trace("write {} (handle: {}, size: {}, offset: {})", path, fi.fh.get(), size, offset);
-			return writeInternal(fi.fh.get(), buf, size, offset);
+			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("write() failed", e);
 			return -ErrorCodes.EIO();
 		}
 	}
 
-	private int writeInternal(long fileHandle, Pointer buf, long size, long offset) throws IOException {
+	private CompletableFuture<Integer> writeInternal(long fileHandle, Pointer buf, long size, long offset) {
 		var openFile = openFileFactory.get(fileHandle);
 		if (openFile.isEmpty()) {
-			return -ErrorCodes.EBADF();
+			return CompletableFuture.completedFuture(-ErrorCodes.EBADF());
 		}
-		return openFile.get().write(buf, offset, size);
+		return openFile.get().write(buf, offset, size).exceptionally(e -> {
+			if (e instanceof NotFoundException) {
+				return -ErrorCodes.ENOENT();
+			} else {
+				LOG.error("write() failed", e);
+				return -ErrorCodes.EIO();
+			}
+		});
 	}
 
 	@Override
@@ -558,6 +570,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 					LOG.info("Still uploading...");
 				}
 			}
+			scheduler.shutdown();
 			LOG.debug("All done.");
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();

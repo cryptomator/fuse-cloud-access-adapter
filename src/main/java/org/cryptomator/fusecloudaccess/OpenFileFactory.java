@@ -9,6 +9,8 @@ import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.inject.Inject;
+import javax.inject.Named;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
@@ -18,14 +20,14 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.StampedLock;
 
+@FileSystemScoped
 class OpenFileFactory {
 
 	private static final AtomicLong FILE_HANDLE_GEN = new AtomicLong();
@@ -37,25 +39,23 @@ class OpenFileFactory {
 	 * OpenFile.close() as well as modifications to OpenFile.getOpenFileHandleCount() MUST be protected by this
 	 * means of synchronization.
 	 */
-	private final ConcurrentMap<CloudPath, OpenFile> activeFiles;
+	private final ConcurrentMap<CloudPath, OpenFile> openFiles;
 	private final Map<Long, OpenFile> fileHandles;
 	private final CloudProvider provider;
 	private final OpenFileUploader uploader;
 	private final Path cacheDir;
 	private final ScheduledExecutorService scheduler;
+	private final StampedLock moveLock;
 
-	public OpenFileFactory(CloudProvider provider, OpenFileUploader uploader, Path cacheDir) {
-		this(new ConcurrentHashMap<>(), provider, uploader, cacheDir, Executors.newSingleThreadScheduledExecutor());
-	}
-
-	// visible for testing
-	OpenFileFactory(ConcurrentMap<CloudPath, OpenFile> activeFiles, CloudProvider provider, OpenFileUploader uploader, Path cacheDir, ScheduledExecutorService scheduler) {
-		this.activeFiles = activeFiles;
+	@Inject
+	OpenFileFactory(@Named("openFiles") ConcurrentMap<CloudPath, OpenFile> openFiles, CloudProvider provider, OpenFileUploader uploader, Path cacheDir, ScheduledExecutorService scheduler, StampedLock moveLock) {
+		this.openFiles = openFiles;
 		this.fileHandles = new HashMap<>();
 		this.provider = provider;
 		this.uploader = uploader;
 		this.cacheDir = cacheDir;
 		this.scheduler = scheduler;
+		this.moveLock = moveLock;
 	}
 
 	/**
@@ -68,7 +68,7 @@ class OpenFileFactory {
 			if (flags.contains(OpenFlags.O_RDWR) || flags.contains(OpenFlags.O_WRONLY)) {
 				uploader.cancelUpload(path);
 			}
-			var openFile = activeFiles.compute(path, (p, file) -> {
+			var openFile = openFiles.compute(path, (p, file) -> {
 				if (file == null) {
 					file = createOpenFile(p, initialSize, lastModified); // TODO remove redundant lastModified?
 				}
@@ -111,20 +111,21 @@ class OpenFileFactory {
 	 * @param oldPath Path to a cached file before it has been moved
 	 * @param newPath New path which is used to access the cached file
 	 */
-	public synchronized void move(CloudPath oldPath, CloudPath newPath) {
+	public void move(CloudPath oldPath, CloudPath newPath) {
 		Preconditions.checkArgument(!oldPath.equals(newPath));
-		var wasUploading = uploader.cancelUpload(oldPath);
 		uploader.cancelUpload(newPath);
-		var activeFile = activeFiles.remove(oldPath);
-		activeFiles.compute(newPath, (p, previouslyActiveFile) -> {
+		var activeFile = openFiles.remove(oldPath);
+		openFiles.compute(newPath, (p, previouslyActiveFile) -> {
 			assert previouslyActiveFile == null || previouslyActiveFile != activeFile; // if previousActiveFile is non-null, it must not be the same as activeFile!
 			if (previouslyActiveFile != null) {
 				previouslyActiveFile.close();
 			}
 			if (activeFile != null) {
-				activeFile.updatePath(newPath);
-				if (wasUploading) {
-					uploader.scheduleUpload(activeFile, this::onFinishedUpload);
+				var stamp = moveLock.writeLock();
+				try {
+					activeFile.setPath(newPath);
+				} finally {
+					moveLock.unlock(stamp);
 				}
 			}
 			return activeFile;
@@ -142,7 +143,7 @@ class OpenFileFactory {
 	public void delete(CloudPath path) {
 		// TODO what about descendants of path?
 		uploader.cancelUpload(path);
-		activeFiles.computeIfPresent(path, (p, file) -> {
+		openFiles.computeIfPresent(path, (p, file) -> {
 			file.close();
 			return null; // removes entry from map
 		});
@@ -160,7 +161,7 @@ class OpenFileFactory {
 			return;
 		}
 		var path = file.getPath();
-		activeFiles.computeIfPresent(path, (p, activeFile) -> {
+		openFiles.computeIfPresent(path, (p, activeFile) -> {
 			if (activeFile.getOpenFileHandleCount().decrementAndGet() == 0) { // was this the last file handle?
 				uploader.scheduleUpload(activeFile, this::onFinishedUpload);
 			}
@@ -173,7 +174,7 @@ class OpenFileFactory {
 	}
 
 	private void closeFileIfIdle(CloudPath path) {
-		activeFiles.computeIfPresent(path, (p, activeFile) -> {
+		openFiles.computeIfPresent(path, (p, activeFile) -> {
 			if (activeFile.getOpenFileHandleCount().get() > 0) { // file has been reopened
 				return activeFile; // keep the mapping
 			} else {
@@ -187,12 +188,13 @@ class OpenFileFactory {
 	/**
 	 * Returns metadata from cache. This is not threadsafe and the returned metadata might refer to an
 	 * file that got evicted just in this moment.
+	 *
 	 * @param path
 	 * @return Optional metadata, which is present if cached
 	 */
 	public Optional<CloudItemMetadata> getCachedMetadata(CloudPath path) {
 		AtomicReference<CloudItemMetadata> result = new AtomicReference<>();
-		activeFiles.computeIfPresent(path, (p, file) -> {
+		openFiles.computeIfPresent(path, (p, file) -> {
 			var lastModified = Optional.of(file.getLastModified());
 			var size = Optional.of(file.getSize());
 			result.set(new CloudItemMetadata(path.getFileName().toString(), path, CloudItemType.FILE, lastModified, size));
