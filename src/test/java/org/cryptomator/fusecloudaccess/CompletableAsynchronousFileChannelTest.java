@@ -144,6 +144,57 @@ public class CompletableAsynchronousFileChannelTest {
 
 	}
 
+
+	@Nested
+	@DisplayName("writeFromPointer(...)")
+	public class WriteFromPointer {
+
+		private Pointer ptr;
+
+		@BeforeEach
+		public void setup() {
+			completableFc = Mockito.spy(completableFc);
+			this.ptr = Mockito.mock(Pointer.class);
+		}
+
+		@Test
+		@DisplayName("exception during write(...)")
+		public void writeFromPointerFails() {
+			var e = new IOException("fail");
+			Mockito.doReturn(CompletableFuture.failedFuture(e)).when(completableFc).writeAll(Mockito.any(), Mockito.anyLong());
+
+			var futureResult = completableFc.writeFromPointer(ptr, 42l, 100l);
+			var thrown = Assertions.assertThrows(ExecutionException.class, () -> {
+				Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
+			});
+
+			Assertions.assertEquals(e, thrown.getCause());
+		}
+
+		@Test
+		@DisplayName("successful single-pass write")
+		public void writeFromPointerSucceedsInSingleIteration() {
+			Mockito.doReturn(CompletableFuture.completedFuture(100)).when(completableFc).writeAll(Mockito.any(), Mockito.eq(42l));
+
+			var futureResult = completableFc.writeFromPointer(ptr, 42l, 100l);
+			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
+
+			Assertions.assertEquals(100, result);
+		}
+
+		@Test
+		@DisplayName("successful multi-pass write")
+		public void writeFromPointerSucceedsInTwoIterations() {
+			Mockito.doReturn(CompletableFuture.completedFuture(4 * MIB)).when(completableFc).writeAll(Mockito.any(), Mockito.eq(0l * MIB));
+			Mockito.doReturn(CompletableFuture.completedFuture(2 * MIB)).when(completableFc).writeAll(Mockito.any(), Mockito.eq(4l * MIB));
+
+			var futureResult = completableFc.writeFromPointer(ptr, 0l, 6l * MIB);
+			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
+
+			Assertions.assertEquals(6 * MIB, result);
+		}
+	}
+
 	@Nested
 	@DisplayName("transferFrom(...)")
 	public class TransferFrom {

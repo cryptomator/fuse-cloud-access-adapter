@@ -61,6 +61,38 @@ class CompletableAsynchronousFileChannel implements Closeable {
 	}
 
 	/**
+	 * Writes <code>count</code> bytes from <code>ptr</code> into the file channel, starting at <code>position</code>.
+	 *
+	 * @param ptr      The buffer where to get bytes to be written
+	 * @param position The position in the file channel
+	 * @param count    The number of bytes to write
+	 * @return The total number of bytes written which should always be <code>count</code>.
+	 */
+	public CompletableFuture<Integer> writeFromPointer(Pointer ptr, long position, long count) {
+		Preconditions.checkArgument(position >= 0);
+		Preconditions.checkArgument(count > 0);
+		return writeFromPointer(ptr, position, count, 0);
+	}
+
+	private CompletableFuture<Integer> writeFromPointer(Pointer ptr, long position, long remaining, int totalWritten) {
+		assert position >= 0;
+		assert remaining > 0;
+		assert totalWritten >= 0;
+		int n = (int) Math.min(BUFFER_SIZE, remaining); // int-cast: n <= BUFFER_SIZE
+		byte[] buffer = new byte[n];
+		ptr.get(position, buffer, totalWritten, n);
+		return this.writeAll(ByteBuffer.wrap(buffer), position).thenCompose(written -> {
+			assert written == n;
+			if (written == remaining) { // DONE, wrote requested number of bytes
+				return CompletableFuture.completedFuture(totalWritten + written);
+			} else { // CONTINUE, further bytes to be written
+				assert written < remaining;
+				return writeFromPointer(ptr, position + written, remaining - written, totalWritten + written);
+			}
+		});
+	}
+
+	/**
 	 * Transfers up to <code>count</code> bytes from <code>in</code> to this file channel starting at <code>position</code>.
 	 *
 	 * @param src      The source to read from
