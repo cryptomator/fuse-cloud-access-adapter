@@ -31,14 +31,16 @@ class CompletableAsynchronousFileChannel implements Closeable {
 	 * @return The total number of bytes read, which is <code>count</code> unless reaching EOF.
 	 */
 	public CompletableFuture<Integer> readToPointer(Pointer ptr, long position, long count) {
+		Preconditions.checkArgument(position >= 0);
+		Preconditions.checkArgument(count > 0);
 		return readToPointer(ptr, position, count, 0);
 	}
 
-	private CompletableFuture<Integer> readToPointer(Pointer ptr, long position, long count, int totalRead) {
-		Preconditions.checkArgument(position >= 0);
-		Preconditions.checkArgument(count > 0);
-		Preconditions.checkArgument(totalRead >= 0);
-		int n = (int) Math.min(BUFFER_SIZE, count); // int-cast: n <= BUFFER_SIZE
+	private CompletableFuture<Integer> readToPointer(Pointer ptr, long position, long remaining, int totalRead) {
+		assert position >= 0;
+		assert remaining > 0;
+		assert totalRead >= 0;
+		int n = (int) Math.min(BUFFER_SIZE, remaining); // int-cast: n <= BUFFER_SIZE
 		ByteBuffer buffer = ByteBuffer.allocate(n);
 		return this.read(buffer, position).thenCompose(read -> {
 			assert read <= n;
@@ -47,13 +49,13 @@ class CompletableAsynchronousFileChannel implements Closeable {
 			}
 			buffer.flip();
 			ptr.put(totalRead, buffer.array(), buffer.position(), buffer.limit());
-			if (read == count // DONE, read requested number of bytes
+			if (read == remaining // DONE, read requested number of bytes
 					|| read < n) { // EOF
 				return CompletableFuture.completedFuture(totalRead + read);
 			} else { // CONTINUE, further bytes to be read
-				assert read < count;
+				assert read < remaining;
 				assert read == n;
-				return this.readToPointer(ptr, position + read, count - read, totalRead + read);
+				return this.readToPointer(ptr, position + read, remaining - read, totalRead + read);
 			}
 		});
 	}
@@ -67,14 +69,16 @@ class CompletableAsynchronousFileChannel implements Closeable {
 	 * @return The total number of bytes transferred, which is <code>count</code> unless reaching EOF.
 	 */
 	public CompletableFuture<Long> transferFrom(InputStream src, long position, long count) {
+		Preconditions.checkArgument(position >= 0);
+		Preconditions.checkArgument(count > 0);
 		return transferFrom(src, position, count, 0l);
 	}
 
-	private CompletableFuture<Long> transferFrom(InputStream src, long position, long count, long totalTransferred) {
-		Preconditions.checkArgument(position >= 0);
-		Preconditions.checkArgument(count > 0);
-		Preconditions.checkArgument(totalTransferred >= 0);
-		int n = (int) Math.min(BUFFER_SIZE, count); // int-cast: n <= BUFFER_SIZE
+	private CompletableFuture<Long> transferFrom(InputStream src, long position, long remaining, long totalTransferred) {
+		assert position >= 0;
+		assert remaining > 0;
+		assert totalTransferred >= 0;
+		int n = (int) Math.min(BUFFER_SIZE, remaining); // int-cast: n <= BUFFER_SIZE
 		try {
 			byte[] bytes = src.readNBytes(n);
 			if (bytes.length == 0) { // EOF
@@ -82,13 +86,13 @@ class CompletableAsynchronousFileChannel implements Closeable {
 			}
 			return this.writeAll(ByteBuffer.wrap(bytes), position).thenCompose(written -> {
 				assert bytes.length == written;
-				if (written == count // DONE, transferred requested number of bytes
+				if (written == remaining // DONE, transferred requested number of bytes
 						|| bytes.length < n) { // EOF
 					return CompletableFuture.completedFuture(totalTransferred + written);
 				} else { // CONTINUE, further bytes to be transferred
-					assert written < count;
+					assert written < remaining;
 					assert written == n;
-					return this.transferFrom(src, position + written, count - written, totalTransferred + written);
+					return this.transferFrom(src, position + written, remaining - written, totalTransferred + written);
 				}
 			});
 		} catch (IOException e) {
@@ -105,13 +109,15 @@ class CompletableAsynchronousFileChannel implements Closeable {
 	 * @return The total number of bytes transferred, which is <code>count</code> unless reaching EOF.
 	 */
 	public CompletableFuture<Long> transferTo(long position, long count, WritableByteChannel dst) {
-		return transferTo(position, count, dst,0l);
-	}
-
-	private CompletableFuture<Long> transferTo(long position, long count, WritableByteChannel dst, long totalTransferred) {
 		Preconditions.checkArgument(position >= 0);
 		Preconditions.checkArgument(count > 0);
-		Preconditions.checkArgument(totalTransferred >= 0);
+		return transferTo(position, count, dst, 0l);
+	}
+
+	private CompletableFuture<Long> transferTo(long position, long remaining, WritableByteChannel dst, long totalTransferred) {
+		assert position >= 0;
+		assert remaining > 0;
+		assert totalTransferred >= 0;
 		ByteBuffer buffer = ByteBuffer.allocate(BUFFER_SIZE);
 		return read(buffer, position).thenCompose(read -> {
 			if (read == -1) {
@@ -127,13 +133,13 @@ class CompletableAsynchronousFileChannel implements Closeable {
 				return CompletableFuture.failedFuture(e);
 			}
 			assert written == read;
-			if (written == count // DONE, transferred requested number of bytes
+			if (written == remaining // DONE, transferred requested number of bytes
 					|| read < buffer.capacity()) { // EOF
 				return CompletableFuture.completedFuture(totalTransferred + written);
 			} else { // CONTINUE, further bytes to be transferred
-				assert written < count;
+				assert written < remaining;
 				assert read == buffer.capacity();
-				return this.transferTo(position + written, count - written, dst,totalTransferred + written);
+				return this.transferTo(position + written, remaining - written, dst, totalTransferred + written);
 			}
 		});
 	}
