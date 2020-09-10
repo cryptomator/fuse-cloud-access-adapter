@@ -13,5 +13,6 @@ pom.xml.versionsBackup
 .idea/jarRepositories.xml
 .idea/encodings.xml
 .idea/modules.xml
+.idea/compiler.xml
 .idea/inspectionProfiles/
 *.iml
