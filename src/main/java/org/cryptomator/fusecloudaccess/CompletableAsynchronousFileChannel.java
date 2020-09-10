@@ -80,7 +80,7 @@ class CompletableAsynchronousFileChannel implements Closeable {
 		assert totalWritten >= 0;
 		int n = (int) Math.min(BUFFER_SIZE, remaining); // int-cast: n <= BUFFER_SIZE
 		byte[] buffer = new byte[n];
-		ptr.get(position, buffer, totalWritten, n);
+		ptr.get(totalWritten, buffer, 0, n);
 		return this.writeAll(ByteBuffer.wrap(buffer), position).thenCompose(written -> {
 			assert written == n;
 			if (written == remaining) { // DONE, wrote requested number of bytes

@@ -180,6 +180,7 @@ public class CompletableAsynchronousFileChannelTest {
 			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
 
 			Assertions.assertEquals(100, result);
+			Mockito.verify(ptr).get(Mockito.eq(0l), Mockito.any(byte[].class), Mockito.eq(0), Mockito.eq(100));
 		}
 
 		@Test
@@ -192,6 +193,8 @@ public class CompletableAsynchronousFileChannelTest {
 			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.get());
 
 			Assertions.assertEquals(6 * MIB, result);
+			Mockito.verify(ptr).get(Mockito.eq(0l * MIB), Mockito.any(byte[].class), Mockito.eq(0), Mockito.eq(4 * MIB));
+			Mockito.verify(ptr).get(Mockito.eq(4l * MIB), Mockito.any(byte[].class), Mockito.eq(0), Mockito.eq(2 * MIB));
 		}
 	}
 
