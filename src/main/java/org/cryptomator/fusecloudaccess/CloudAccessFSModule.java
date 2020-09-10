@@ -15,10 +15,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.locks.StampedLock;
 
-/**
- * Fragen: Wenn mehrere Mounts ausgeführt werden, teilen sich diese die gleiche ThreadFactory, moveLock und den scheduler??
- * -> Scope mit "PerFilesystem" erstellen?
- */
 @Module
 class CloudAccessFSModule {
 
@@ -55,20 +51,4 @@ class CloudAccessFSModule {
 	static ConcurrentMap<CloudPath, Future<?>> provideUploadTasksMap() {
 		return new ConcurrentHashMap<>();
 	}
-/*
-	@Provides
-	CloudProvider provideCloudProvider(CloudProvider provider){
-		return provider;
-	}
-
-	@Provides
-	Path provideCacheDir(Path cacheDir){
-		return cacheDir;
-	}
-
-	@Provides
-	CloudPath provideUploadDir(CloudPath uploadDir){
-		return uploadDir;
-	}
-*/
 }
