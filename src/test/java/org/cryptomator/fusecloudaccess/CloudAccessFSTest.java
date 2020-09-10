@@ -36,6 +36,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -47,6 +48,7 @@ public class CloudAccessFSTest {
 
 	private CloudAccessFS cloudFs;
 	private CloudProvider provider;
+	private ScheduledExecutorService scheduler;
 	private OpenFileUploader uploader;
 	private OpenFileFactory fileFactory;
 	private OpenDirFactory dirFactory;
@@ -66,11 +68,12 @@ public class CloudAccessFSTest {
 	@BeforeEach
 	public void setup() {
 		provider = Mockito.mock(CloudProvider.class);
+		scheduler = Mockito.mock(ScheduledExecutorService.class);
 		uploader = Mockito.mock(OpenFileUploader.class);
 		fileFactory = Mockito.mock(OpenFileFactory.class);
 		dirFactory = Mockito.mock(OpenDirFactory.class);
 		lockManager = Mockito.mock(LockManager.class);
-		cloudFs = new CloudAccessFS(provider, CloudAccessFSTest.TIMEOUT, uploader, fileFactory, dirFactory, lockManager);
+		cloudFs = new CloudAccessFS(provider, CloudAccessFSTest.TIMEOUT, scheduler, uploader, fileFactory, dirFactory, lockManager);
 
 		pathLockBuilder = Mockito.mock(PathLockBuilder.class);
 		pathLock = Mockito.mock(PathLock.class);

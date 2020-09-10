@@ -46,8 +46,8 @@ class OpenFileFactory {
 	private final ScheduledExecutorService scheduler;
 	private final StampedLock moveLock;
 
-	public OpenFileFactory(CloudProvider provider, OpenFileUploader uploader, Path cacheDir, StampedLock moveLock) {
-		this(new ConcurrentHashMap<>(), provider, uploader, cacheDir, Executors.newSingleThreadScheduledExecutor(), moveLock);
+	public OpenFileFactory(CloudProvider provider, OpenFileUploader uploader, Path cacheDir, ScheduledExecutorService scheduler, StampedLock moveLock) {
+		this(new ConcurrentHashMap<>(), provider, uploader, cacheDir, scheduler, moveLock);
 	}
 
 	// visible for testing

@@ -1,5 +1,6 @@
 package org.cryptomator.fusecloudaccess;
 
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import jnr.constants.platform.OpenFlags;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudItemMetadata;
@@ -32,6 +33,10 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.StampedLock;
@@ -40,10 +45,12 @@ import java.util.function.Function;
 public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	private static final Logger LOG = LoggerFactory.getLogger(CloudAccessFS.class);
+	private static final ThreadFactory SCHEDULER_THREAD_FACTORY = new ThreadFactoryBuilder().setDaemon(false).setNameFormat("scheduler-%d").build();
 	private static final int BLOCKSIZE = 4096;
 
 	private final CloudProvider provider;
 	private final int timeoutMillis;
+	private final ScheduledExecutorService scheduler;
 	private final OpenFileUploader openFileUploader;
 	private final OpenFileFactory openFileFactory;
 	private final OpenDirFactory openDirFactory;
@@ -56,17 +63,18 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	private CloudAccessFS(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir, int timeoutMillis, StampedLock moveLock) {
-		this(provider, cacheDir, timeoutMillis, moveLock, new OpenFileUploader(provider, cacheDir, cloudUploadDir, moveLock));
+		this(provider, cacheDir, timeoutMillis, Executors.newSingleThreadScheduledExecutor(SCHEDULER_THREAD_FACTORY), moveLock, new OpenFileUploader(provider, cacheDir, cloudUploadDir, moveLock));
 	}
 
-	private CloudAccessFS(CloudProvider provider, Path cacheDir, int timeoutMillis, StampedLock moveLock, OpenFileUploader openFileUploader) {
-		this(provider, timeoutMillis, openFileUploader, new OpenFileFactory(provider, openFileUploader, cacheDir, moveLock), new OpenDirFactory(provider), new LockManager());
+	private CloudAccessFS(CloudProvider provider, Path cacheDir, int timeoutMillis, ScheduledExecutorService scheduler, StampedLock moveLock, OpenFileUploader openFileUploader) {
+		this(provider, timeoutMillis, scheduler, openFileUploader, new OpenFileFactory(provider, openFileUploader, cacheDir, scheduler, moveLock), new OpenDirFactory(provider), new LockManager());
 	}
 
 	//Visible for testing
-	CloudAccessFS(CloudProvider provider, int timeoutMillis, OpenFileUploader openFileUploader, OpenFileFactory openFileFactory, OpenDirFactory openDirFactory, LockManager lockManager) {
+	CloudAccessFS(CloudProvider provider, int timeoutMillis, ScheduledExecutorService scheduler, OpenFileUploader openFileUploader, OpenFileFactory openFileFactory, OpenDirFactory openDirFactory, LockManager lockManager) {
 		this.provider = provider;
 		this.timeoutMillis = timeoutMillis;
+		this.scheduler = scheduler;
 		this.openFileUploader = openFileUploader;
 		this.openFileFactory = openFileFactory;
 		this.openDirFactory = openDirFactory;
@@ -570,6 +578,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 					LOG.info("Still uploading...");
 				}
 			}
+			scheduler.shutdown();
 			LOG.debug("All done.");
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
