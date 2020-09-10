@@ -516,7 +516,7 @@ public class CloudAccessFSTest {
 		@Test
 		public void testSuccessfulReadReturnsZero() throws IOException {
 			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(openFile));
-			Mockito.when(openFile.write(buf, 1l, 2l)).thenReturn(0);
+			Mockito.when(openFile.write(buf, 1l, 2l)).thenReturn(CompletableFuture.completedFuture(0));
 
 			var result = cloudFs.write(PATH.toString(), buf, 2l, 1l, fi);
 
@@ -528,7 +528,7 @@ public class CloudAccessFSTest {
 		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws ReflectiveOperationException, IOException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
 			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(openFile));
-			Mockito.when(openFile.write(buf, 1l, 2l)).thenThrow(e);
+			Mockito.when(openFile.write(buf, 1l, 2l)).thenReturn(CompletableFuture.failedFuture(e));
 
 			var result = cloudFs.write(PATH.toString(), buf, 2l, 1l, fi);
 

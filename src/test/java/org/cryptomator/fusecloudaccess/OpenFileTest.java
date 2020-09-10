@@ -111,50 +111,37 @@ public class OpenFileTest {
 
 		@DisplayName("fail due to I/O error")
 		@Test
-		public void testWriteFailsWithException() throws IOException {
+		public void testWriteFailsWithException() {
 			var e = new IOException("fail");
 			CompletableFuture<Integer> failedFuture = CompletableFuture.failedFuture(e);
 			var buf = Mockito.mock(Pointer.class);
-			Mockito.when(fileChannel.write(Mockito.any(), Mockito.anyLong())).thenReturn(failedFuture);
+			Mockito.when(fileChannel.writeFromPointer(buf, 1000l, 42l)).thenReturn(failedFuture);
 
-			var thrown = Assertions.assertThrows(IOException.class, () -> {
-				openFile.write(buf, 1000l, 42l);
+			var futureResult = openFile.write(buf, 1000l, 42l);
+			var thrown = Assertions.assertThrows(ExecutionException.class, () -> {
+				Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 			});
 
-			Assertions.assertEquals(e, thrown);
+			Assertions.assertEquals(e, thrown.getCause());
 		}
 
 		@DisplayName("successful write")
 		@ParameterizedTest(name = "write(buf, 1000, {0})")
 		@ValueSource(ints = {0, 100, 1023, 1024, 1025, 10_000})
-		public void testWrite(int n) throws IOException {
-			var content = new byte[n];
-			var written = new byte[n];
+		public void testWrite(int n) {
+			Assumptions.assumeTrue(openFile.getSize() == 100l);
 			var buf = Mockito.mock(Pointer.class);
-			new Random(42l).nextBytes(content);
-			Mockito.doAnswer(invocation -> {
-				long offset = invocation.getArgument(0);
-				byte[] dst = invocation.getArgument(1);
-				int idx = invocation.getArgument(2);
-				int len = invocation.getArgument(3);
-				System.arraycopy(content, (int) offset, dst, idx, len);
-				return null;
-			}).when(buf).get(Mockito.anyLong(), Mockito.any(byte[].class), Mockito.anyInt(), Mockito.anyInt());
-			Mockito.doAnswer(invocation -> {
-				ByteBuffer source = invocation.getArgument(0);
-				long pos = invocation.getArgument(1);
-				int count = source.capacity();
-				source.get(written, (int) pos - 1000, count);
-				return CompletableFuture.completedFuture(count);
-			}).when(fileChannel).write(Mockito.any(), Mockito.anyLong());
+			Mockito.when(fileChannel.writeFromPointer(buf, 1000l, n)).thenReturn(CompletableFuture.completedFuture(n));
+
 			Assumptions.assumeFalse(openFile.isDirty());
 
-			var result = openFile.write(buf, 1000l, n);
+			var futureResult = openFile.write(buf, 1000l, n);
+			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 			Assertions.assertEquals(n, result);
-			Assertions.assertArrayEquals(content, written);
 			Assertions.assertTrue(openFile.isDirty());
-			Mockito.verify(populatedRanges).add(Range.closedOpen(1000l, 1000l + n));
+			Mockito.verify(populatedRanges).add(Range.closedOpen(100l, 1000l)); // fils is grown from 100 to 1000
+			Mockito.verify(populatedRanges).add(Range.closedOpen(1000l, 1000l + n)); // content of size n gets written starting at 1000
 		}
 
 	}

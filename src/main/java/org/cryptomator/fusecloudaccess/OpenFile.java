@@ -26,7 +26,6 @@ import java.time.Instant;
 import java.util.Iterator;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.nio.file.StandardOpenOption.*;
@@ -34,7 +33,6 @@ import static java.nio.file.StandardOpenOption.*;
 class OpenFile implements Closeable {
 
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFile.class);
-	private static final int BUFFER_SIZE = 1024; // 1 kiB
 	private static final int READAHEAD_SIZE = 1024 * 1024; // 1 MiB
 
 	private final CompletableAsynchronousFileChannel fc;
@@ -154,35 +152,17 @@ class OpenFile implements Closeable {
 	 * @param count  Number of bytes to write
 	 * @return A CompletionStage either containing the actual number of bytes written or failing with an {@link IOException}
 	 */
-	public int write(Pointer buf, long offset, long count) throws IOException {
+	public CompletableFuture<Integer> write(Pointer buf, long offset, long count) {
 		Preconditions.checkState(fc.isOpen());
-		assert count < Integer.MAX_VALUE; // technically an unsigned integer in the c header file
 		setDirty(true);
 		setLastModified(Instant.now());
 		markPopulatedIfGrowing(offset);
-		long pos = offset;
-		while (pos < offset + count) {
-			int n = (int) Math.min(BUFFER_SIZE, count - (pos - offset)); // int-cast: n <= BUFFER_SIZE
-			byte[] tmp = new byte[n];
-			buf.get(pos - offset, tmp, 0, n);
-			try {
-				pos += fc.write(ByteBuffer.wrap(tmp), pos).get();
-			} catch (InterruptedException e) {
-				//TODO: handle dis better
-				LOG.info("Interrupted write().");
-				e.printStackTrace();
-				throw new IOException("Interrupt");
-			} catch (ExecutionException e) {
-				if (e.getCause() instanceof IOException) {
-					throw (IOException) e.getCause();
-				}
+		return fc.writeFromPointer(buf, offset, count).thenApply(written -> {
+			synchronized (populatedRanges) {
+				populatedRanges.add(Range.closedOpen(offset, offset + written));
 			}
-		}
-		int written = (int) (pos - offset); // int-cast: result <= size
-		synchronized (populatedRanges) {
-			populatedRanges.add(Range.closedOpen(offset, offset + written));
-		}
-		return written;
+			return written;
+		});
 	}
 
 	/**

@@ -478,20 +478,28 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	public int write(String path, Pointer buf, long size, long offset, FuseFileInfo fi) {
 		try (PathLock pathLock = lockManager.createPathLock(path).forReading(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
+			var returnCode =  writeInternal(fi.fh.get(), buf, size, offset);
 			LOG.trace("write {} (handle: {}, size: {}, offset: {})", path, fi.fh.get(), size, offset);
-			return writeInternal(fi.fh.get(), buf, size, offset);
+			return returnOrTimeout(returnCode);
 		} catch (Exception e) {
 			LOG.error("write() failed", e);
 			return -ErrorCodes.EIO();
 		}
 	}
 
-	private int writeInternal(long fileHandle, Pointer buf, long size, long offset) throws IOException {
+	private CompletableFuture<Integer> writeInternal(long fileHandle, Pointer buf, long size, long offset) {
 		var openFile = openFileFactory.get(fileHandle);
 		if (openFile.isEmpty()) {
-			return -ErrorCodes.EBADF();
+			return CompletableFuture.completedFuture(-ErrorCodes.EBADF());
 		}
-		return openFile.get().write(buf, offset, size);
+		return openFile.get().write(buf, offset, size).exceptionally(e -> {
+			if (e instanceof NotFoundException) {
+				return -ErrorCodes.ENOENT();
+			} else {
+				LOG.error("write() failed", e);
+				return -ErrorCodes.EIO();
+			}
+		});
 	}
 
 	@Override
