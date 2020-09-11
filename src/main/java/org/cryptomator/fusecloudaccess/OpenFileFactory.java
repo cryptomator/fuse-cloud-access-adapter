@@ -25,7 +25,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.locks.StampedLock;
 
 @FileSystemScoped
 class OpenFileFactory {
@@ -63,9 +62,6 @@ class OpenFileFactory {
 	 */
 	public long open(CloudPath path, Set<OpenFlags> flags, long initialSize, Instant lastModified) throws IOException {
 		try {
-			if (flags.contains(OpenFlags.O_RDWR) || flags.contains(OpenFlags.O_WRONLY)) {
-				uploader.cancelUpload(path);
-			}
 			var openFile = openFiles.compute(path, (p, file) -> {
 				if (file == null) {
 					file = createOpenFile(p, initialSize, lastModified); // TODO remove redundant lastModified?
@@ -158,15 +154,18 @@ class OpenFileFactory {
 			return;
 		}
 		var path = file.getPath();
-		openFiles.computeIfPresent(path, (p, activeFile) -> {
-			if (activeFile.getOpenFileHandleCount().decrementAndGet() == 0) { // was this the last file handle?
-				uploader.scheduleUpload(activeFile, this::onFinishedUpload);
+		openFiles.computeIfPresent(path, (p, f) -> {
+			if (f.getOpenFileHandleCount().decrementAndGet() == 0 && f.transitionToUploading()) { // was this the last file handle?
+				uploader.scheduleUpload(f, this::scheduleClose);
 			}
-			return activeFile; // DO NOT remove the mapping yet! this might be done in #onFinishedUpload
+			if (f.getState() == OpenFile.State.UNMODIFIED) {
+				scheduleClose(f);
+			}
+			return f; // DO NOT remove the mapping yet! this might be done in #scheduleClose
 		});
 	}
 
-	private void onFinishedUpload(OpenFile file) {
+	private void scheduleClose(OpenFile file) {
 		scheduler.schedule(() -> closeFileIfIdle(file.getPath()), KEEP_IDLE_FILE_SECONDS, TimeUnit.SECONDS);
 	}
 
@@ -174,7 +173,7 @@ class OpenFileFactory {
 		openFiles.computeIfPresent(path, (p, activeFile) -> {
 			if (activeFile.getOpenFileHandleCount().get() > 0) { // file has been reopened
 				return activeFile; // keep the mapping
-			} else {
+			} else { // TODO: check if unmodified?
 				LOG.info("Closing idle file {}", path);
 				activeFile.close();
 				return null; // remove mapping

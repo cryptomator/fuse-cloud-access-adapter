@@ -56,29 +56,16 @@ public class OpenFileUploaderTest {
 		this.lockManager = Mockito.mock(LockManager.class);
 		this.uploader = new OpenFileUploader(provider, cacheDir, cloudUploadDir, executorService, tasks, lockManager);
 		this.file = Mockito.mock(OpenFile.class);
-
 		this.cloudUploadDir = CloudPath.of("/upload/path/in/cloud");
-	}
-
-	@Test
-	@DisplayName("noop when scheduling unmodified file")
-	public void testUploadUnmodified() {
-		Mockito.when(file.isDirty()).thenReturn(false);
-
-		uploader.scheduleUpload(file, ignored -> {
-		});
-
-		Mockito.verify(executorService, Mockito.never()).submit(Mockito.any(Runnable.class));
-		Mockito.verify(tasks, Mockito.never()).put(Mockito.any(), Mockito.any());
+		Mockito.when(file.getState()).thenReturn(OpenFile.State.UPLOADING);
 	}
 
 
 	@Test
-	@DisplayName("scheduling modified file (no previous upload)")
+	@DisplayName("scheduling upload")
 	public void testUploadModified() {
 		var cloudPath = Mockito.mock(CloudPath.class, "/path/in/cloud");
 		var task = Mockito.mock(Future.class);
-		Mockito.when(file.isDirty()).thenReturn(true);
 		Mockito.when(file.getPath()).thenReturn(cloudPath);
 		Mockito.when(executorService.submit(Mockito.any(OpenFileUploader.ScheduledUpload.class))).thenReturn(task);
 
@@ -87,25 +74,6 @@ public class OpenFileUploaderTest {
 
 		Mockito.verify(executorService).submit(Mockito.any(OpenFileUploader.ScheduledUpload.class));
 		Mockito.verify(tasks).put(cloudPath, task);
-	}
-
-	@Test
-	@DisplayName("scheduling modified file (cancel previous upload)")
-	public void testUploadModifiedAndCancelPrevious() {
-		var cloudPath = Mockito.mock(CloudPath.class, "/path/in/cloud");
-		var task = Mockito.mock(Future.class);
-		var previousTask = Mockito.mock(Future.class);
-		Mockito.when(file.isDirty()).thenReturn(true);
-		Mockito.when(file.getPath()).thenReturn(cloudPath);
-		Mockito.when(executorService.submit(Mockito.any(OpenFileUploader.ScheduledUpload.class))).thenReturn(task);
-		Mockito.when(tasks.put(cloudPath, task)).thenReturn(previousTask);
-
-		uploader.scheduleUpload(file, ignored -> {
-		});
-
-		Mockito.verify(executorService).submit(Mockito.any(OpenFileUploader.ScheduledUpload.class));
-		Mockito.verify(tasks).put(cloudPath, task);
-		Mockito.verify(previousTask).cancel(true);
 	}
 
 	@Test
@@ -206,6 +174,7 @@ public class OpenFileUploaderTest {
 			this.upload = new OpenFileUploader.ScheduledUpload(provider, openFile, onFinished, tmpDir, cloudUploadDir, lockManager);
 			Mockito.when(lockManager.createPathLock(Mockito.any())).thenReturn(pathLockBuilder);
 			Mockito.when(pathLockBuilder.forWriting()).thenReturn(pathLock);
+			Mockito.when(openFile.getState()).thenReturn(OpenFile.State.UPLOADING);
 		}
 
 		@Test

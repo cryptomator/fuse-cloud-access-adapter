@@ -29,6 +29,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static java.nio.file.StandardOpenOption.*;
 
@@ -41,10 +42,11 @@ class OpenFile implements Closeable {
 	private final CloudProvider provider;
 	private final RangeSet<Long> populatedRanges;
 	private final AtomicInteger openFileHandleCount;
+	private final AtomicReference<OpenFile.State> state;
 	private volatile CloudPath path;
 	private Instant lastModified;
-	private boolean dirty;
 
+	public enum State {UNMODIFIED, NEEDS_UPLOAD, UPLOADING, NEEDS_REUPLOAD}
 
 	// visible for testing
 	OpenFile(CloudPath path, CompletableAsynchronousFileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified) {
@@ -53,6 +55,7 @@ class OpenFile implements Closeable {
 		this.provider = provider;
 		this.populatedRanges = populatedRanges;
 		this.openFileHandleCount = new AtomicInteger();
+		this.state = new AtomicReference<>(State.UNMODIFIED);
 		this.lastModified = initialLastModified;
 	}
 
@@ -86,8 +89,39 @@ class OpenFile implements Closeable {
 		return openFileHandleCount;
 	}
 
+	public State getState() {
+		return state.get();
+	}
+
+	public boolean transitionToUploading() {
+		return state.compareAndSet(State.NEEDS_UPLOAD, State.UPLOADING);
+	}
+
+	public boolean transitionToUnmodified() {
+		return state.compareAndSet(State.UPLOADING, State.UNMODIFIED);
+	}
+
+	public boolean transitionToReuploading() {
+		return state.compareAndSet(State.NEEDS_REUPLOAD, State.UPLOADING);
+	}
+
 	public CloudPath getPath() {
 		return path;
+	}
+
+	private void markDirty() {
+		state.updateAndGet(currentState -> {
+			switch (currentState) {
+				case UNMODIFIED:
+				case NEEDS_UPLOAD:
+					return State.NEEDS_UPLOAD;
+				case UPLOADING:
+				case NEEDS_REUPLOAD:
+					return State.NEEDS_REUPLOAD;
+				default:
+					throw new IllegalStateException("Unsupported state");
+			}
+		});
 	}
 
 	// must only be modified when having a path lock for "newPath"
@@ -108,14 +142,6 @@ class OpenFile implements Closeable {
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}
-	}
-
-	public void setDirty(boolean dirty) {
-		this.dirty = dirty;
-	}
-
-	public boolean isDirty() {
-		return dirty;
 	}
 
 	public Instant getLastModified() {
@@ -164,7 +190,7 @@ class OpenFile implements Closeable {
 	 */
 	public CompletableFuture<Integer> write(Pointer buf, long offset, long count) {
 		Preconditions.checkState(fc.isOpen());
-		setDirty(true);
+		markDirty();
 		setLastModified(Instant.now());
 		markPopulatedIfGrowing(offset);
 		return fc.writeFromPointer(buf, offset, count).thenApply(written -> {
@@ -279,13 +305,13 @@ class OpenFile implements Closeable {
 		Preconditions.checkState(fc.isOpen());
 		if (size < fc.size()) {
 			fc.truncate(size);
-			setDirty(true);
+			markDirty();
 			setLastModified(Instant.now());
 		} else if (size > fc.size()) {
 			assert size > 0;
 			markPopulatedIfGrowing(size);
 			fc.write(ByteBuffer.allocateDirect(1), size - 1);
-			setDirty(true);
+			markDirty();
 			setLastModified(Instant.now());
 		} else {
 			assert size == fc.size();

@@ -19,7 +19,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.StampedLock;
 
 public class OpenFileFactoryTest {
 
@@ -53,9 +52,10 @@ public class OpenFileFactoryTest {
 
 	@Test
 	@DisplayName("closing non-last file handle removes it without upload")
-	public void testClosingReleasesHandle() throws IOException {
+	public void testClosingReleasesHandleNotLast() throws IOException {
 		var handle = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 		Assumptions.assumeTrue(openFileFactory.get(handle).isPresent());
+		Mockito.when(openFile.transitionToUploading()).thenReturn(false);
 		Mockito.when(openFile.getPath()).thenReturn(PATH);
 		Mockito.when(openFile.getOpenFileHandleCount()).thenReturn(new AtomicInteger(3));
 
@@ -68,10 +68,27 @@ public class OpenFileFactoryTest {
 	}
 
 	@Test
-	@DisplayName("closing last file handle triggers upload")
+	@DisplayName("closing last file handle removes it without upload if unmodified")
+	public void testClosingReleasesHandleUnmodified() throws IOException {
+		var handle = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
+		Assumptions.assumeTrue(openFile.equals(openFileFactory.get(handle).get()));
+		Mockito.when(openFile.transitionToUploading()).thenReturn(false);
+		Mockito.when(openFile.getPath()).thenReturn(PATH);
+		Mockito.when(openFile.getOpenFileHandleCount()).thenReturn(new AtomicInteger(1));
+
+		openFileFactory.close(handle);
+
+		Assertions.assertEquals(0, openFile.getOpenFileHandleCount().get());
+		Assertions.assertTrue(activeFiles.containsKey(PATH));
+		Mockito.verify(uploader, Mockito.never()).scheduleUpload(Mockito.any(), Mockito.any());
+	}
+
+	@Test
+	@DisplayName("closing last file handle triggers upload if modified")
 	public void testClosingLastHandleTriggersUpload() throws IOException {
 		var handle = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 		Assumptions.assumeTrue(openFile.equals(openFileFactory.get(handle).get()));
+		Mockito.when(openFile.transitionToUploading()).thenReturn(true);
 		Mockito.when(openFile.getPath()).thenReturn(PATH);
 		Mockito.when(openFile.getOpenFileHandleCount()).thenReturn(new AtomicInteger(1));
 

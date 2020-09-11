@@ -1,5 +1,6 @@
 package org.cryptomator.fusecloudaccess;
 
+import com.google.common.base.Preconditions;
 import com.google.common.io.Closeables;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
@@ -25,8 +26,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.StampedLock;
 import java.util.function.Consumer;
 
 /**
@@ -64,22 +63,19 @@ class OpenFileUploader {
 	 * @param onFinished Callback invoked after successful upload
 	 */
 	public void scheduleUpload(OpenFile file, Consumer<OpenFile> onFinished) {
-		if (!file.isDirty()) {
-			LOG.trace("Upload of {} skipped. Unmodified.", file.getPath());
-			onFinished.accept(file);
-			return; // no-op
-		}
-		file.setDirty(false); // start recording further modifications to trigger additional uploads if needed
+		Preconditions.checkState(file.getState() == OpenFile.State.UPLOADING, "File not marked as UPLOADING");
+		LOG.debug("starting upload {} {}", file.getPath(), file);
 		Consumer<OpenFile> decoratedOnFinished = f -> {
 			tasks.remove(f.getPath());
-			onFinished.accept(f);
+			if (f.transitionToUnmodified()) {
+				onFinished.accept(f);
+			} else if (f.transitionToReuploading()) {
+				scheduleUpload(file, onFinished);
+			}
 		};
-		LOG.debug("starting upload {} {}", file.getPath(), file);
 		var task = executorService.submit(new ScheduledUpload(provider, file, decoratedOnFinished, cacheDir, cloudUploadDir, lockManager));
 		var previousTask = tasks.put(file.getPath(), task);
-		if (previousTask != null) {
-			previousTask.cancel(true);
-		}
+		assert previousTask == null : "Must not schedule new upload before finishing previous one";
 	}
 
 	/**
@@ -127,6 +123,7 @@ class OpenFileUploader {
 
 		@Override
 		public Void call() throws IOException {
+			assert openFile.getState() == OpenFile.State.UPLOADING;
 			String tmpFileName = UUID.randomUUID() + ".tmp";
 			Path localTmpFile = cacheDir.resolve(tmpFileName);
 			CloudPath cloudTmpFile = cloudUploadDir.resolve(tmpFileName);
