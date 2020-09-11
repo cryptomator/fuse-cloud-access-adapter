@@ -110,7 +110,7 @@ public class OpenFileUploaderTest {
 	public void testCancelExistingUpload() {
 		var cloudPath = Mockito.mock(CloudPath.class, "/path/in/cloud");
 		var task = Mockito.mock(Future.class);
-		Mockito.when(tasks.get(cloudPath)).thenReturn(task);
+		Mockito.when(tasks.remove(cloudPath)).thenReturn(task);
 
 		var canceled = uploader.cancelUpload(cloudPath);
 
