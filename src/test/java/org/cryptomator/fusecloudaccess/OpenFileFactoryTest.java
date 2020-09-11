@@ -30,13 +30,12 @@ public class OpenFileFactoryTest {
 	private CloudProvider provider = Mockito.mock(CloudProvider.class);
 	private OpenFileUploader uploader = Mockito.mock(OpenFileUploader.class);
 	private ScheduledExecutorService scheduler = Mockito.mock(ScheduledExecutorService.class);
-	private StampedLock moveLock = Mockito.mock(StampedLock.class);
 	private OpenFileFactory openFileFactory;
 	private OpenFile openFile;
 
 	@BeforeEach
 	public void setup(@TempDir Path tmpDir) {
-		openFileFactory = new OpenFileFactory(activeFiles, provider, uploader, tmpDir, scheduler, moveLock);
+		openFileFactory = new OpenFileFactory(activeFiles, provider, uploader, tmpDir, scheduler);
 		openFile = Mockito.mock(OpenFile.class);
 		activeFiles.put(PATH, openFile);
 		Mockito.when(openFile.getOpenFileHandleCount()).thenReturn(new AtomicInteger(0));

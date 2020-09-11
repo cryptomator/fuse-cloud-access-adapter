@@ -34,12 +34,6 @@ class CloudAccessFSModule {
 
 	@Provides
 	@FileSystemScoped
-	static StampedLock provideMoveLock() {
-		return new StampedLock();
-	}
-
-	@Provides
-	@FileSystemScoped
 	@Named("openFiles")
 	static ConcurrentMap<CloudPath, OpenFile> provideOpenFilesMap() {
 		return new ConcurrentHashMap<>();

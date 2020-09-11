@@ -45,17 +45,15 @@ class OpenFileFactory {
 	private final OpenFileUploader uploader;
 	private final Path cacheDir;
 	private final ScheduledExecutorService scheduler;
-	private final StampedLock moveLock;
 
 	@Inject
-	OpenFileFactory(@Named("openFiles") ConcurrentMap<CloudPath, OpenFile> openFiles, CloudProvider provider, OpenFileUploader uploader, Path cacheDir, ScheduledExecutorService scheduler, StampedLock moveLock) {
+	OpenFileFactory(@Named("openFiles") ConcurrentMap<CloudPath, OpenFile> openFiles, CloudProvider provider, OpenFileUploader uploader, Path cacheDir, ScheduledExecutorService scheduler) {
 		this.openFiles = openFiles;
 		this.fileHandles = new HashMap<>();
 		this.provider = provider;
 		this.uploader = uploader;
 		this.cacheDir = cacheDir;
 		this.scheduler = scheduler;
-		this.moveLock = moveLock;
 	}
 
 	/**
@@ -115,6 +113,7 @@ class OpenFileFactory {
 		Preconditions.checkArgument(!oldPath.equals(newPath));
 		uploader.cancelUpload(newPath);
 		var activeFile = openFiles.remove(oldPath);
+		LOG.debug("Moving {} from {} -> {}", activeFile, oldPath, newPath);
 		openFiles.compute(newPath, (p, previouslyActiveFile) -> {
 			assert previouslyActiveFile == null || previouslyActiveFile != activeFile; // if previousActiveFile is non-null, it must not be the same as activeFile!
 			if (previouslyActiveFile != null) {
@@ -122,12 +121,8 @@ class OpenFileFactory {
 				previouslyActiveFile.close();
 			}
 			if (activeFile != null) {
-				var stamp = moveLock.writeLock();
-				try {
-					activeFile.setPath(newPath);
-				} finally {
-					moveLock.unlock(stamp);
-				}
+				LOG.debug("Setting path of {} to {}", activeFile, p);
+				activeFile.setPath(newPath);
 			}
 			return activeFile;
 		});
@@ -145,7 +140,7 @@ class OpenFileFactory {
 		// TODO what about descendants of path?
 		uploader.cancelUpload(path);
 		openFiles.computeIfPresent(path, (p, file) -> {
-			LOG.debug("Closing deleted file {}", p);
+			LOG.debug("Closing deleted file {} {}", p, file);
 			file.close();
 			return null; // removes entry from map
 		});

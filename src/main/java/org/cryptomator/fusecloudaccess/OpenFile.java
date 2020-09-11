@@ -90,7 +90,7 @@ class OpenFile implements Closeable {
 		return path;
 	}
 
-	// protected by "moveLock"
+	// must only be modified when having a path lock for "newPath"
 	public void setPath(CloudPath newPath) {
 		this.path = newPath;
 	}
@@ -110,7 +110,7 @@ class OpenFile implements Closeable {
 		}
 	}
 
-	private void setDirty(boolean dirty) {
+	public void setDirty(boolean dirty) {
 		this.dirty = dirty;
 	}
 
@@ -325,10 +325,7 @@ class OpenFile implements Closeable {
 			} catch (IOException e) {
 				return CompletableFuture.failedFuture(e);
 			}
-			var transferTask = fc.transferTo(0, size, dst).<Void>thenApply(transferred -> {
-				setDirty(false);
-				return null;
-			});
+			var transferTask = fc.transferTo(0, size, dst).<Void>thenApply(transferred -> null);
 			return transferTask.whenComplete((result, exception) -> closeQuietly(dst));
 		});
 	}
