@@ -309,7 +309,7 @@ class OpenFile implements Closeable {
 	}
 
 	/**
-	 * Saves a copy of the data contained in this open file to the specified destination path.
+	 * Saves a copy of the data contained in this open file to the specified destination path and resets the dirty flag.
 	 * If there are any uncached ranges within this file, they'll get loaded before.
 	 *
 	 * @param destination A path of a non-existing file in an existing directory.
@@ -325,7 +325,10 @@ class OpenFile implements Closeable {
 			} catch (IOException e) {
 				return CompletableFuture.failedFuture(e);
 			}
-			var transferTask = fc.transferTo(0, size, dst).<Void>thenApply(transferred -> null);
+			var transferTask = fc.transferTo(0, size, dst).<Void>thenApply(transferred -> {
+				setDirty(false);
+				return null;
+			});
 			return transferTask.whenComplete((result, exception) -> closeQuietly(dst));
 		});
 	}
