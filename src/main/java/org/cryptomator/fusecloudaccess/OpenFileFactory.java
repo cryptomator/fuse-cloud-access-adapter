@@ -32,7 +32,7 @@ class OpenFileFactory {
 
 	private static final AtomicLong FILE_HANDLE_GEN = new AtomicLong();
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFileFactory.class);
-	private static final int KEEP_IDLE_FILE_SECONDS = 10;
+	private static final int KEEP_IDLE_FILE_SECONDS = 10; // TODO make configurable
 
 	/*
 	 * activeFiles.compute is the primary barrier for synchronized access when creating/closing/moving OpenFiles
@@ -118,6 +118,7 @@ class OpenFileFactory {
 		openFiles.compute(newPath, (p, previouslyActiveFile) -> {
 			assert previouslyActiveFile == null || previouslyActiveFile != activeFile; // if previousActiveFile is non-null, it must not be the same as activeFile!
 			if (previouslyActiveFile != null) {
+				LOG.debug("Closing {}. Replaced by move()", p);
 				previouslyActiveFile.close();
 			}
 			if (activeFile != null) {
@@ -144,6 +145,7 @@ class OpenFileFactory {
 		// TODO what about descendants of path?
 		uploader.cancelUpload(path);
 		openFiles.computeIfPresent(path, (p, file) -> {
+			LOG.debug("Closing deleted file {}", p);
 			file.close();
 			return null; // removes entry from map
 		});
@@ -178,7 +180,7 @@ class OpenFileFactory {
 			if (activeFile.getOpenFileHandleCount().get() > 0) { // file has been reopened
 				return activeFile; // keep the mapping
 			} else {
-				LOG.info("closing idle file {}", path);
+				LOG.info("Closing idle file {}", path);
 				activeFile.close();
 				return null; // remove mapping
 			}
