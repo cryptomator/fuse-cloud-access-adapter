@@ -79,32 +79,6 @@ public class OpenFileTest {
 		Assertions.assertEquals(100, Files.size(persistentFile));
 	}
 
-	@Test
-	@DisplayName("test closeWhenDone(...) on successful completion")
-	public void testCloseWhenDone1() throws IOException {
-		var closeable = Mockito.mock(Closeable.class);
-		var completable = new CompletableFuture<Integer>();
-
-		var result = openFile.closeWhenDone(closeable, completable);
-		Mockito.verify(closeable, Mockito.never()).close();
-
-		completable.complete(1);
-		Mockito.verify(closeable).close();
-	}
-
-	@Test
-	@DisplayName("test closeWhenDone(...) on exceptional completion")
-	public void testCloseWhenDone2() throws IOException {
-		var closeable = Mockito.mock(Closeable.class);
-		var completable = new CompletableFuture<Integer>();
-
-		var result = openFile.closeWhenDone(closeable, completable);
-		Mockito.verify(closeable, Mockito.never()).close();
-
-		completable.completeExceptionally(new Exception("fail."));
-		Mockito.verify(closeable).close();
-	}
-
 	@Nested
 	@DisplayName("write(...)")
 	public class Write {

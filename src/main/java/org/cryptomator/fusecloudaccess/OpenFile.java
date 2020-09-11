@@ -217,8 +217,8 @@ class OpenFile implements Closeable {
 		long offset = requestedRange.lowerEndpoint();
 		long size = requestedRange.upperEndpoint() - requestedRange.lowerEndpoint();
 		return provider.read(path, offset, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
-			var merged = mergeData(requestedRange, in);
-			return closeWhenDone(in, merged);
+			var mergeTask = mergeData(requestedRange, in);
+			return mergeTask.whenComplete((result, exception) -> closeQuietly(in));
 		});
 	}
 
@@ -324,22 +324,9 @@ class OpenFile implements Closeable {
 			} catch (IOException e) {
 				return CompletableFuture.failedFuture(e);
 			}
-			var result = fc.transferTo(0, size, dst).<Void>thenApply(transferred -> null);
-			return closeWhenDone(dst, result);
+			var transferTask = fc.transferTo(0, size, dst).<Void>thenApply(transferred -> null);
+			return transferTask.whenComplete((result, exception) -> closeQuietly(dst));
 		});
-	}
-
-	/**
-	 * Closes the given <code>closeable</code> as soon as <code>completionStage</code> completes
-	 * either successfully or exceptionally.
-	 *
-	 * @param closeable       The closeaeble to close
-	 * @param completionStage The job to finish
-	 * @return The result of the given <code>completionStage</code>
-	 */
-	// visible for testing
-	<T> CompletionStage<T> closeWhenDone(Closeable closeable, CompletionStage<T> completionStage) {
-		return CompletionUtils.runAlways(completionStage, () -> closeQuietly(closeable));
 	}
 
 	private void closeQuietly(Closeable closeable) {

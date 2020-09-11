@@ -87,7 +87,7 @@ class OpenFileUploader {
 	 */
 	public boolean cancelUpload(CloudPath path) {
 		LOG.trace("Cancel possible upload for {}", path);
-		var task = tasks.get(path);
+		var task = tasks.remove(path);
 		if (task != null) {
 			task.cancel(true);
 			LOG.debug("Cancelled upload for {}", path);
@@ -127,7 +127,6 @@ class OpenFileUploader {
 			String tmpFileName = UUID.randomUUID() + ".tmp";
 			Path localTmpFile = cacheDir.resolve(tmpFileName);
 			CloudPath cloudTmpFile = cloudUploadDir.resolve(tmpFileName);
-			AtomicLong moveLockStamp = new AtomicLong();
 			try {
 				openFile.persistTo(localTmpFile)
 						.thenCompose((ignored) -> {
@@ -136,15 +135,15 @@ class OpenFileUploader {
 								var size = openFile.getSize();
 								var lastModified = openFile.getLastModified();
 								var in = Files.newInputStream(localTmpFile);
-								var upload = provider.write(cloudTmpFile, true, in, size, Optional.of(lastModified), ProgressListener.NO_PROGRESS_AWARE);
-								return CompletionUtils.runAlways(upload, () -> Closeables.closeQuietly(in));
+								var uploadTask = provider.write(cloudTmpFile, true, in, size, Optional.of(lastModified), ProgressListener.NO_PROGRESS_AWARE);
+								return uploadTask.whenComplete((result, exception) -> Closeables.closeQuietly(in));
 							} catch (IOException e) {
 								return CompletableFuture.failedFuture(e);
 							}
 						})
 						.thenCompose(ignored -> {
-							moveLockStamp.set(moveLock.writeLock());
-							return provider.move(cloudTmpFile, openFile.getPath(), true);
+							long stamp = moveLock.writeLock();
+							return provider.move(cloudTmpFile, openFile.getPath(), true).whenComplete((r, e) -> moveLock.unlock(stamp));
 						})
 						.toCompletableFuture().get();
 				return null;
@@ -159,9 +158,6 @@ class OpenFileUploader {
 				// TODO copy file to some lost+found dir
 				throw new IOException("Upload failed.", e);
 			} finally {
-				if (moveLockStamp.get() != 0) {
-					moveLock.unlock(moveLockStamp.get());
-				}
 				Files.deleteIfExists(localTmpFile);
 				onFinished.accept(openFile);
 			}
