@@ -95,9 +95,17 @@ class OpenFileFactory {
 		return Optional.ofNullable(fileHandles.get(fileHandle));
 	}
 
+	public void move(CloudPath oldPath, CloudPath newPath) {
+		for (CloudPath path : openFiles.keySet()) {
+			if (path.startsWith(oldPath)) {
+				moveSingleFile(path, newPath.resolve(oldPath.relativize(path)));
+			}
+		}
+	}
+
 	/**
 	 * Updates existing cached data for <code>newPath</code> (if any) with contents formerly mapped to <code>oldPath</code>,
-	 * invalidates <code>oldPath</code> and cancel pending uploads for both paths (if any).
+	 * invalidates <code>oldPath</code> and cancel pending uploads for the {@code newPath}
 	 * <p>
 	 * Cached data previously mapped to <code>newPath</code> will be discarded. No-op if no data cached for either path.
 	 * <p>
@@ -105,7 +113,7 @@ class OpenFileFactory {
 	 * @param oldPath Path to a cached file before it has been moved
 	 * @param newPath New path which is used to access the cached file
 	 */
-	public void move(CloudPath oldPath, CloudPath newPath) {
+	void moveSingleFile(CloudPath oldPath, CloudPath newPath) {
 		Preconditions.checkArgument(!oldPath.equals(newPath));
 		uploader.cancelUpload(newPath);
 		var activeFile = openFiles.remove(oldPath);
