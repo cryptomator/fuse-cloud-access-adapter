@@ -1,9 +1,11 @@
 package org.cryptomator.fusecloudaccess;
 
+import com.google.common.base.Preconditions;
 import com.google.common.io.Closeables;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
+import org.cryptomator.fusecloudaccess.locks.LockManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,7 +26,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.locks.StampedLock;
 import java.util.function.Consumer;
 
 /**
@@ -42,16 +43,16 @@ class OpenFileUploader {
 	private final CloudPath cloudUploadDir;
 	private final ExecutorService executorService;
 	private final ConcurrentMap<CloudPath, Future<?>> tasks;
-	private final StampedLock moveLock;
+	private final LockManager lockManager;
 
 	@Inject
-	OpenFileUploader(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir, ExecutorService executorService, @Named("uploadTasks") ConcurrentMap<CloudPath, Future<?>> tasks, StampedLock moveLock) {
+	OpenFileUploader(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir, ExecutorService executorService, @Named("uploadTasks") ConcurrentMap<CloudPath, Future<?>> tasks, LockManager lockManager) {
 		this.provider = provider;
 		this.cacheDir = cacheDir;
 		this.cloudUploadDir = cloudUploadDir;
 		this.executorService = executorService;
 		this.tasks = tasks;
-		this.moveLock = moveLock;
+		this.lockManager = lockManager;
 	}
 
 	/**
@@ -62,20 +63,19 @@ class OpenFileUploader {
 	 * @param onFinished Callback invoked after successful upload
 	 */
 	public void scheduleUpload(OpenFile file, Consumer<OpenFile> onFinished) {
-		if (!file.isDirty()) {
-			LOG.trace("Upload of {} skipped. Unmodified.", file.getPath());
-			onFinished.accept(file);
-			return; // no-op
-		}
+		Preconditions.checkState(file.getState() == OpenFile.State.UPLOADING, "File not marked as UPLOADING");
+		LOG.debug("starting upload {} {}", file.getPath(), file);
 		Consumer<OpenFile> decoratedOnFinished = f -> {
 			tasks.remove(f.getPath());
-			onFinished.accept(f);
+			if (f.transitionToUnmodified()) {
+				onFinished.accept(f);
+			} else if (f.transitionToReuploading()) {
+				scheduleUpload(file, onFinished);
+			}
 		};
-		var task = executorService.submit(new ScheduledUpload(provider, file, decoratedOnFinished, cacheDir, cloudUploadDir, moveLock));
+		var task = executorService.submit(new ScheduledUpload(provider, file, decoratedOnFinished, cacheDir, cloudUploadDir, lockManager));
 		var previousTask = tasks.put(file.getPath(), task);
-		if (previousTask != null) {
-			previousTask.cancel(true);
-		}
+		assert previousTask == null : "Must not schedule new upload before finishing previous one";
 	}
 
 	/**
@@ -86,7 +86,7 @@ class OpenFileUploader {
 	 */
 	public boolean cancelUpload(CloudPath path) {
 		LOG.trace("Cancel possible upload for {}", path);
-		var task = tasks.get(path);
+		var task = tasks.remove(path);
 		if (task != null) {
 			task.cancel(true);
 			LOG.debug("Cancelled upload for {}", path);
@@ -110,19 +110,20 @@ class OpenFileUploader {
 		private final Consumer<OpenFile> onFinished;
 		private final Path cacheDir;
 		private final CloudPath cloudUploadDir;
-		private final StampedLock moveLock;
+		private final LockManager lockManager;
 
-		public ScheduledUpload(CloudProvider provider, OpenFile openFile, Consumer<OpenFile> onFinished, Path cacheDir, CloudPath cloudUploadDir, StampedLock moveLock) {
+		public ScheduledUpload(CloudProvider provider, OpenFile openFile, Consumer<OpenFile> onFinished, Path cacheDir, CloudPath cloudUploadDir, LockManager lockManager) {
 			this.provider = provider;
 			this.openFile = openFile;
 			this.onFinished = onFinished;
 			this.cacheDir = cacheDir;
 			this.cloudUploadDir = cloudUploadDir;
-			this.moveLock = moveLock;
+			this.lockManager = lockManager;
 		}
 
 		@Override
 		public Void call() throws IOException {
+			assert openFile.getState() == OpenFile.State.UPLOADING;
 			String tmpFileName = UUID.randomUUID() + ".tmp";
 			Path localTmpFile = cacheDir.resolve(tmpFileName);
 			CloudPath cloudTmpFile = cloudUploadDir.resolve(tmpFileName);
@@ -134,18 +135,18 @@ class OpenFileUploader {
 								var size = openFile.getSize();
 								var lastModified = openFile.getLastModified();
 								var in = Files.newInputStream(localTmpFile);
-								var upload = provider.write(cloudTmpFile, true, in, size, Optional.of(lastModified), ProgressListener.NO_PROGRESS_AWARE);
-								return CompletionUtils.runAlways(upload, () -> Closeables.closeQuietly(in));
+								var uploadTask = provider.write(cloudTmpFile, true, in, size, Optional.of(lastModified), ProgressListener.NO_PROGRESS_AWARE);
+								return uploadTask.whenComplete((result, exception) -> Closeables.closeQuietly(in));
 							} catch (IOException e) {
 								return CompletableFuture.failedFuture(e);
 							}
 						})
-						.thenCompose(ignored -> {
-							return CompletionUtils.runLocked(moveLock, () -> {
-								return provider.move(cloudTmpFile, openFile.getPath(), true);
-							});
-						})
 						.toCompletableFuture().get();
+				// since this is async code, we need a new path lock for this move:
+				try (var lock = lockManager.createPathLock(openFile.getPath().toString()).forWriting()) {
+					LOG.debug("Finishing upload of {} to {}", openFile, openFile.getPath());
+					provider.move(cloudTmpFile, openFile.getPath(), true).toCompletableFuture().get();
+				}
 				return null;
 			} catch (CancellationException e) {    //OK
 				LOG.debug("Canceled upload for {}.", openFile.getPath());

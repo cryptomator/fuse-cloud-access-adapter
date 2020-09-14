@@ -19,15 +19,12 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -79,32 +76,6 @@ public class OpenFileTest {
 		Assertions.assertEquals(100, Files.size(persistentFile));
 	}
 
-	@Test
-	@DisplayName("test closeWhenDone(...) on successful completion")
-	public void testCloseWhenDone1() throws IOException {
-		var closeable = Mockito.mock(Closeable.class);
-		var completable = new CompletableFuture<Integer>();
-
-		var result = openFile.closeWhenDone(closeable, completable);
-		Mockito.verify(closeable, Mockito.never()).close();
-
-		completable.complete(1);
-		Mockito.verify(closeable).close();
-	}
-
-	@Test
-	@DisplayName("test closeWhenDone(...) on exceptional completion")
-	public void testCloseWhenDone2() throws IOException {
-		var closeable = Mockito.mock(Closeable.class);
-		var completable = new CompletableFuture<Integer>();
-
-		var result = openFile.closeWhenDone(closeable, completable);
-		Mockito.verify(closeable, Mockito.never()).close();
-
-		completable.completeExceptionally(new Exception("fail."));
-		Mockito.verify(closeable).close();
-	}
-
 	@Nested
 	@DisplayName("write(...)")
 	public class Write {
@@ -132,14 +103,13 @@ public class OpenFileTest {
 			Assumptions.assumeTrue(openFile.getSize() == 100l);
 			var buf = Mockito.mock(Pointer.class);
 			Mockito.when(fileChannel.writeFromPointer(buf, 1000l, n)).thenReturn(CompletableFuture.completedFuture(n));
-
-			Assumptions.assumeFalse(openFile.isDirty());
+			Assumptions.assumeTrue(openFile.getState() == OpenFile.State.UNMODIFIED);
 
 			var futureResult = openFile.write(buf, 1000l, n);
 			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 			Assertions.assertEquals(n, result);
-			Assertions.assertTrue(openFile.isDirty());
+			Assertions.assertEquals(OpenFile.State.NEEDS_UPLOAD, openFile.getState());
 			Mockito.verify(populatedRanges).add(Range.closedOpen(100l, 1000l)); // fils is grown from 100 to 1000
 			Mockito.verify(populatedRanges).add(Range.closedOpen(1000l, 1000l + n)); // content of size n gets written starting at 1000
 		}
@@ -185,7 +155,7 @@ public class OpenFileTest {
 			var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 			Assertions.assertEquals(readSize, result);
-			Assertions.assertFalse(fileSpy.isDirty());
+			Assertions.assertEquals(OpenFile.State.UNMODIFIED, openFile.getState());
 		}
 
 		@Test
@@ -359,7 +329,7 @@ public class OpenFileTest {
 		@BeforeEach
 		public void setup() {
 			Assumptions.assumeTrue(openFile.getSize() == 100l);
-			Assumptions.assumeFalse(openFile.isDirty());
+			Assumptions.assumeTrue(openFile.getState() == OpenFile.State.UNMODIFIED);
 		}
 
 		@DisplayName("shrinking (new size < 100)")
@@ -370,7 +340,7 @@ public class OpenFileTest {
 
 			Mockito.verify(fileChannel).truncate(size);
 			Mockito.verify(fileChannel, Mockito.never()).write(Mockito.any(), Mockito.anyLong());
-			Assertions.assertTrue(openFile.isDirty());
+			Assertions.assertEquals(OpenFile.State.NEEDS_UPLOAD, openFile.getState());
 		}
 
 		@DisplayName("growing (new size > 100)")
@@ -381,7 +351,7 @@ public class OpenFileTest {
 
 			Mockito.verify(fileChannel, Mockito.never()).truncate(Mockito.anyLong());
 			Mockito.verify(fileChannel).write(Mockito.argThat(b -> b.remaining() == 1), Mockito.eq(size - 1));
-			Assertions.assertTrue(openFile.isDirty());
+			Assertions.assertEquals(OpenFile.State.NEEDS_UPLOAD, openFile.getState());
 		}
 
 		@Test
@@ -391,7 +361,7 @@ public class OpenFileTest {
 
 			Mockito.verify(fileChannel, Mockito.never()).truncate(Mockito.anyLong());
 			Mockito.verify(fileChannel, Mockito.never()).write(Mockito.any(), Mockito.anyLong());
-			Assertions.assertFalse(openFile.isDirty());
+			Assertions.assertEquals(OpenFile.State.UNMODIFIED, openFile.getState());
 		}
 
 	}

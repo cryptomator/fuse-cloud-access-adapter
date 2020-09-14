@@ -19,7 +19,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.StampedLock;
 
 public class OpenFileFactoryTest {
 
@@ -30,13 +29,12 @@ public class OpenFileFactoryTest {
 	private CloudProvider provider = Mockito.mock(CloudProvider.class);
 	private OpenFileUploader uploader = Mockito.mock(OpenFileUploader.class);
 	private ScheduledExecutorService scheduler = Mockito.mock(ScheduledExecutorService.class);
-	private StampedLock moveLock = Mockito.mock(StampedLock.class);
 	private OpenFileFactory openFileFactory;
 	private OpenFile openFile;
 
 	@BeforeEach
 	public void setup(@TempDir Path tmpDir) {
-		openFileFactory = new OpenFileFactory(activeFiles, provider, uploader, tmpDir, scheduler, moveLock);
+		openFileFactory = new OpenFileFactory(activeFiles, provider, uploader, tmpDir, scheduler);
 		openFile = Mockito.mock(OpenFile.class);
 		activeFiles.put(PATH, openFile);
 		Mockito.when(openFile.getOpenFileHandleCount()).thenReturn(new AtomicInteger(0));
@@ -54,9 +52,10 @@ public class OpenFileFactoryTest {
 
 	@Test
 	@DisplayName("closing non-last file handle removes it without upload")
-	public void testClosingReleasesHandle() throws IOException {
+	public void testClosingReleasesHandleNotLast() throws IOException {
 		var handle = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 		Assumptions.assumeTrue(openFileFactory.get(handle).isPresent());
+		Mockito.when(openFile.transitionToUploading()).thenReturn(false);
 		Mockito.when(openFile.getPath()).thenReturn(PATH);
 		Mockito.when(openFile.getOpenFileHandleCount()).thenReturn(new AtomicInteger(3));
 
@@ -69,10 +68,27 @@ public class OpenFileFactoryTest {
 	}
 
 	@Test
-	@DisplayName("closing last file handle triggers upload")
+	@DisplayName("closing last file handle removes it without upload if unmodified")
+	public void testClosingReleasesHandleUnmodified() throws IOException {
+		var handle = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
+		Assumptions.assumeTrue(openFile.equals(openFileFactory.get(handle).get()));
+		Mockito.when(openFile.transitionToUploading()).thenReturn(false);
+		Mockito.when(openFile.getPath()).thenReturn(PATH);
+		Mockito.when(openFile.getOpenFileHandleCount()).thenReturn(new AtomicInteger(1));
+
+		openFileFactory.close(handle);
+
+		Assertions.assertEquals(0, openFile.getOpenFileHandleCount().get());
+		Assertions.assertTrue(activeFiles.containsKey(PATH));
+		Mockito.verify(uploader, Mockito.never()).scheduleUpload(Mockito.any(), Mockito.any());
+	}
+
+	@Test
+	@DisplayName("closing last file handle triggers upload if modified")
 	public void testClosingLastHandleTriggersUpload() throws IOException {
 		var handle = openFileFactory.open(PATH, OPEN_FLAGS, 42l, Instant.EPOCH);
 		Assumptions.assumeTrue(openFile.equals(openFileFactory.get(handle).get()));
+		Mockito.when(openFile.transitionToUploading()).thenReturn(true);
 		Mockito.when(openFile.getPath()).thenReturn(PATH);
 		Mockito.when(openFile.getOpenFileHandleCount()).thenReturn(new AtomicInteger(1));
 

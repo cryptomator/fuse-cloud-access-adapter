@@ -3,6 +3,9 @@ package org.cryptomator.fusecloudaccess;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.exceptions.CloudProviderException;
+import org.cryptomator.fusecloudaccess.locks.LockManager;
+import org.cryptomator.fusecloudaccess.locks.PathLock;
+import org.cryptomator.fusecloudaccess.locks.PathLockBuilder;
 import org.hamcrest.CoreMatchers;
 import org.hamcrest.MatcherAssert;
 import org.junit.jupiter.api.Assertions;
@@ -40,7 +43,7 @@ public class OpenFileUploaderTest {
 	private CloudPath cloudUploadDir;
 	private ExecutorService executorService;
 	private ConcurrentMap<CloudPath, Future<?>> tasks;
-	private StampedLock moveLock;
+	private LockManager lockManager;
 	private OpenFileUploader uploader;
 	private OpenFile file;
 
@@ -50,32 +53,19 @@ public class OpenFileUploaderTest {
 		this.cacheDir = Mockito.mock(Path.class);
 		this.executorService = Mockito.mock(ExecutorService.class);
 		this.tasks = Mockito.mock(ConcurrentMap.class);
-		this.moveLock = Mockito.mock(StampedLock.class);
-		this.uploader = new OpenFileUploader(provider, cacheDir, cloudUploadDir, executorService, tasks, moveLock);
+		this.lockManager = Mockito.mock(LockManager.class);
+		this.uploader = new OpenFileUploader(provider, cacheDir, cloudUploadDir, executorService, tasks, lockManager);
 		this.file = Mockito.mock(OpenFile.class);
-
 		this.cloudUploadDir = CloudPath.of("/upload/path/in/cloud");
-	}
-
-	@Test
-	@DisplayName("noop when scheduling unmodified file")
-	public void testUploadUnmodified() {
-		Mockito.when(file.isDirty()).thenReturn(false);
-
-		uploader.scheduleUpload(file, ignored -> {
-		});
-
-		Mockito.verify(executorService, Mockito.never()).submit(Mockito.any(Runnable.class));
-		Mockito.verify(tasks, Mockito.never()).put(Mockito.any(), Mockito.any());
+		Mockito.when(file.getState()).thenReturn(OpenFile.State.UPLOADING);
 	}
 
 
 	@Test
-	@DisplayName("scheduling modified file (no previous upload)")
+	@DisplayName("scheduling upload")
 	public void testUploadModified() {
 		var cloudPath = Mockito.mock(CloudPath.class, "/path/in/cloud");
 		var task = Mockito.mock(Future.class);
-		Mockito.when(file.isDirty()).thenReturn(true);
 		Mockito.when(file.getPath()).thenReturn(cloudPath);
 		Mockito.when(executorService.submit(Mockito.any(OpenFileUploader.ScheduledUpload.class))).thenReturn(task);
 
@@ -84,25 +74,6 @@ public class OpenFileUploaderTest {
 
 		Mockito.verify(executorService).submit(Mockito.any(OpenFileUploader.ScheduledUpload.class));
 		Mockito.verify(tasks).put(cloudPath, task);
-	}
-
-	@Test
-	@DisplayName("scheduling modified file (cancel previous upload)")
-	public void testUploadModifiedAndCancelPrevious() {
-		var cloudPath = Mockito.mock(CloudPath.class, "/path/in/cloud");
-		var task = Mockito.mock(Future.class);
-		var previousTask = Mockito.mock(Future.class);
-		Mockito.when(file.isDirty()).thenReturn(true);
-		Mockito.when(file.getPath()).thenReturn(cloudPath);
-		Mockito.when(executorService.submit(Mockito.any(OpenFileUploader.ScheduledUpload.class))).thenReturn(task);
-		Mockito.when(tasks.put(cloudPath, task)).thenReturn(previousTask);
-
-		uploader.scheduleUpload(file, ignored -> {
-		});
-
-		Mockito.verify(executorService).submit(Mockito.any(OpenFileUploader.ScheduledUpload.class));
-		Mockito.verify(tasks).put(cloudPath, task);
-		Mockito.verify(previousTask).cancel(true);
 	}
 
 	@Test
@@ -110,7 +81,7 @@ public class OpenFileUploaderTest {
 	public void testCancelExistingUpload() {
 		var cloudPath = Mockito.mock(CloudPath.class, "/path/in/cloud");
 		var task = Mockito.mock(Future.class);
-		Mockito.when(tasks.get(cloudPath)).thenReturn(task);
+		Mockito.when(tasks.remove(cloudPath)).thenReturn(task);
 
 		var canceled = uploader.cancelUpload(cloudPath);
 
@@ -138,7 +109,7 @@ public class OpenFileUploaderTest {
 		@BeforeEach
 		public void setup() {
 			this.executorService = Executors.newSingleThreadExecutor();
-			this.uploader = new OpenFileUploader(provider, cacheDir, cloudUploadDir, executorService, tasks, moveLock);
+			this.uploader = new OpenFileUploader(provider, cacheDir, cloudUploadDir, executorService, tasks, lockManager);
 		}
 
 		@Test
@@ -185,10 +156,12 @@ public class OpenFileUploaderTest {
 	public class ScheduledUploadTest {
 
 		private Path tmpDir;
-		CloudProvider provider;
-		OpenFile openFile;
-		Consumer<OpenFile> onFinished;
+		private CloudProvider provider;
+		private OpenFile openFile;
+		private Consumer<OpenFile> onFinished;
 		private OpenFileUploader.ScheduledUpload upload;
+		private PathLockBuilder pathLockBuilder;
+		private PathLock pathLock;
 
 		@BeforeEach
 		public void setup(@TempDir Path tmpDir) {
@@ -196,7 +169,12 @@ public class OpenFileUploaderTest {
 			this.provider = Mockito.mock(CloudProvider.class);
 			this.openFile = Mockito.mock(OpenFile.class);
 			this.onFinished = Mockito.mock(Consumer.class);
-			this.upload = new OpenFileUploader.ScheduledUpload(provider, openFile, onFinished, tmpDir, cloudUploadDir, moveLock);
+			this.pathLockBuilder = Mockito.mock(PathLockBuilder.class);
+			this.pathLock = Mockito.mock(PathLock.class);
+			this.upload = new OpenFileUploader.ScheduledUpload(provider, openFile, onFinished, tmpDir, cloudUploadDir, lockManager);
+			Mockito.when(lockManager.createPathLock(Mockito.any())).thenReturn(pathLockBuilder);
+			Mockito.when(pathLockBuilder.forWriting()).thenReturn(pathLock);
+			Mockito.when(openFile.getState()).thenReturn(OpenFile.State.UPLOADING);
 		}
 
 		@Test
@@ -213,6 +191,7 @@ public class OpenFileUploaderTest {
 			Assertions.assertSame(e, thrown.getCause().getCause());
 			Mockito.verify(onFinished).accept(Mockito.any());
 			Assertions.assertEquals(0l, Files.list(tmpDir).count());
+			Mockito.verifyNoMoreInteractions(lockManager);
 		}
 
 		@Test
@@ -239,6 +218,7 @@ public class OpenFileUploaderTest {
 			Assertions.assertSame(e, thrown.getCause().getCause());
 			Mockito.verify(onFinished).accept(Mockito.any());
 			Assertions.assertEquals(0l, Files.list(tmpDir).count());
+			Mockito.verifyNoMoreInteractions(lockManager);
 		}
 
 		@Test
@@ -260,6 +240,8 @@ public class OpenFileUploaderTest {
 
 			Mockito.verify(onFinished).accept(openFile);
 			Assertions.assertEquals(0l, Files.list(tmpDir).count());
+			Mockito.verify(lockManager).createPathLock(cloudPath.toString());
+			Mockito.verify(pathLock).close();
 		}
 
 		@Test
@@ -303,6 +285,9 @@ public class OpenFileUploaderTest {
 			Mockito.verify(onFinished).accept(openFile);
 			Assertions.assertEquals(0l, Files.list(tmpDir).count());
 			Mockito.verify(provider).move(Mockito.any(), Mockito.eq(cloudPath2), Mockito.eq(true));
+			Mockito.verify(lockManager, Mockito.never()).createPathLock(cloudPath1.toString());
+			Mockito.verify(lockManager).createPathLock(cloudPath2.toString());
+			Mockito.verify(pathLock).close();
 		}
 
 	}
