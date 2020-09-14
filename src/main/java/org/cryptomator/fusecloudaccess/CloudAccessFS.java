@@ -579,7 +579,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 					openFileUploader.awaitPendingUploads(30, TimeUnit.SECONDS); // TODO make configurable
 					break;
 				} catch (TimeoutException e) {
-					LOG.info("Still uploading...");
+					LOG.debug("Still uploading...");
 				}
 			}
 			scheduler.shutdown();

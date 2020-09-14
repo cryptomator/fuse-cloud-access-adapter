@@ -171,10 +171,11 @@ class OpenFileFactory {
 
 	private void closeFileIfIdle(CloudPath path) {
 		openFiles.computeIfPresent(path, (p, activeFile) -> {
-			if (activeFile.getOpenFileHandleCount().get() > 0) { // file has been reopened
+			if (activeFile.getOpenFileHandleCount().get() > 0 // file has been reopened
+					|| activeFile.getState() != OpenFile.State.UNMODIFIED) { // file is scheduled for upload
 				return activeFile; // keep the mapping
-			} else { // TODO: check if unmodified?
-				LOG.info("Closing idle file {}", path);
+			} else {
+				LOG.debug("Closing idle file {}", path);
 				activeFile.close();
 				return null; // remove mapping
 			}
