@@ -432,7 +432,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	public int rmdir(String path) {
 		try (PathLock pathLock = lockManager.createPathLock(path.toString()).forWriting(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
-			var rmdirCode = deleteInternal(CloudPath.of(path));
+			var rmdirCode = rmdirInternal(CloudPath.of(path));
 			var returnCode = returnOrTimeout(rmdirCode);
 			LOG.trace("rmdir {} [{}]", path, returnCode);
 			return returnCode;
@@ -442,11 +442,25 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		}
 	}
 
+	CompletionStage<Integer> rmdirInternal(CloudPath path) {
+		openFileFactory.deleteDescendants(path);
+		return provider.delete(path) //
+				.thenApply(ignored -> 0) //
+				.exceptionally(e -> {
+					if (e instanceof NotFoundException) {
+						return -ErrorCodes.ENOENT();
+					} else {
+						LOG.error("delete() failed", e);
+						return -ErrorCodes.EIO();
+					}
+				});
+	}
+
 	@Override
 	public int unlink(String path) {
 		try (PathLock pathLock = lockManager.createPathLock(path.toString()).forWriting(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
-			var unlinkCode = deleteInternal(CloudPath.of(path));
+			var unlinkCode = unlinkInternal(CloudPath.of(path));
 			var returnCode = returnOrTimeout(unlinkCode);
 			LOG.trace("unlink {} [{}]", path, returnCode);
 			return returnCode;
@@ -457,7 +471,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	// visible for testing
-	CompletionStage<Integer> deleteInternal(CloudPath path) {
+	CompletionStage<Integer> unlinkInternal(CloudPath path) {
 		openFileFactory.delete(path);
 		return provider.delete(path) //
 				.thenApply(ignored -> 0) //

@@ -133,13 +133,20 @@ class OpenFileFactory {
 	 * @param path Path to a cached file
 	 */
 	public void delete(CloudPath path) {
-		// TODO what about descendants of path?
 		uploader.cancelUpload(path);
 		openFiles.computeIfPresent(path, (p, file) -> {
 			LOG.debug("Closing deleted file {} {}", p, file);
 			file.close();
 			return null; // removes entry from map
 		});
+	}
+
+	public void deleteDescendants(CloudPath parent) {
+		for (CloudPath path : openFiles.keySet()) {
+			if (path.startsWith(parent)) {
+				delete(path);
+			}
+		}
 	}
 
 	/**

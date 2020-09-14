@@ -777,6 +777,8 @@ public class CloudAccessFSTest {
 			Mockito.verify(pathLock).lockDataForWriting();
 			Mockito.verify(pathLock).close();
 			Mockito.verify(dataLock).close();
+
+			Mockito.verify(fileFactory).delete(PATH);
 		}
 
 		@DisplayName("unlink(...) returns 0 on success")
@@ -799,73 +801,6 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualResult);
 		}
 
-
-		@ParameterizedTest(name = "unlink(...) returns EIO on any other exception (expected or not)")
-		@ValueSource(classes = {CloudProviderException.class, Exception.class})
-		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
-			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(e));
-
-			var actualResult = cloudFs.unlink(PATH.toString());
-
-			Assertions.assertEquals(-ErrorCodes.EIO(), actualResult);
-		}
-
-	}
-
-	@Nested
-	class DeleteTest {
-
-		@AfterEach
-		public void tearDown() {
-			Mockito.verify(lockManager).createPathLock(PATH.toString());
-			Mockito.verify(pathLockBuilder).forWriting();
-			Mockito.verify(pathLock).lockDataForWriting();
-			Mockito.verify(pathLock).close();
-			Mockito.verify(dataLock).close();
-		}
-
-		@DisplayName("unlink(...) returns 0 on success")
-		@Test
-		public void testUnlinkReturnsZeroOnSuccess() {
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.completedFuture(null));
-
-			var actualResult = cloudFs.unlink(PATH.toString());
-
-			Assertions.assertEquals(0, actualResult);
-		}
-
-		@DisplayName("rmdir(...) returns 0 on success")
-		@Test
-		public void testRmdirReturnsZeroOnSuccess() {
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.completedFuture(null));
-
-			var actualResult = cloudFs.rmdir(PATH.toString());
-
-			Assertions.assertEquals(0, actualResult);
-		}
-
-		@DisplayName("unlink(...) returns ENOENT if path not found")
-		@Test
-		public void testUnlinkReturnsENOENTOnNotFoundException() {
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
-
-			var actualResult = cloudFs.unlink(PATH.toString());
-
-			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualResult);
-		}
-
-		@DisplayName("rmdir(...) returns ENOENT if path not found")
-		@Test
-		public void testRmdirReturnsENOENTOnNotFoundException() {
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
-
-			var actualResult = cloudFs.rmdir(PATH.toString());
-
-			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualResult);
-		}
-
-
 		@DisplayName("unlink(...) returns EIO on any other exception (expected or not)")
 		@ParameterizedTest(name = "unlink(...) returns EIO on {0}")
 		@ValueSource(classes = {CloudProviderException.class, Exception.class})
@@ -878,10 +813,46 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.EIO(), actualResult);
 		}
 
-		@DisplayName("rmdir(...) returns EIO on any other exception (expected or not)")
+	}
+
+	@Nested
+	class RmdirTest {
+
+		@AfterEach
+		public void tearDown() {
+			Mockito.verify(lockManager).createPathLock(PATH.toString());
+			Mockito.verify(pathLockBuilder).forWriting();
+			Mockito.verify(pathLock).lockDataForWriting();
+			Mockito.verify(pathLock).close();
+			Mockito.verify(dataLock).close();
+
+			Mockito.verify(fileFactory).deleteDescendants(PATH);
+		}
+
+		@Test
+		@DisplayName("rmdir() returns 0 on success")
+		public void testOnSuccessReturnsZero() {
+			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.completedFuture(null));
+
+			var actualResult = cloudFs.rmdir(PATH.toString());
+
+			Assertions.assertEquals(0, actualResult);
+		}
+
+		@Test
+		@DisplayName("rmdir() returns ENOENT if not found")
+		public void testNotFoundReturnsENOENT() {
+			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
+
+			var actualResult = cloudFs.rmdir(PATH.toString());
+
+			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualResult);
+		}
+
+		@DisplayName("rmdir() returns EIO on any other exception")
 		@ParameterizedTest(name = "rmdir(...) returns EIO on {0}")
 		@ValueSource(classes = {CloudProviderException.class, Exception.class})
-		public void testRmdirReturnsEIOOnException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
+		public void testOtherErrorsReturnEIO(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
 			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(e));
 
