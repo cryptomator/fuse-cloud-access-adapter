@@ -24,6 +24,7 @@ import java.nio.channels.WritableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Iterator;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -191,7 +192,7 @@ class OpenFile implements Closeable {
 	public CompletableFuture<Integer> write(Pointer buf, long offset, long count) {
 		Preconditions.checkState(fc.isOpen());
 		markDirty();
-		setLastModified(Instant.now());
+		setLastModified(Instant.now().truncatedTo(ChronoUnit.SECONDS));
 		markPopulatedIfGrowing(offset);
 		return fc.writeFromPointer(buf, offset, count).thenApply(written -> {
 			synchronized (populatedRanges) {
@@ -306,13 +307,13 @@ class OpenFile implements Closeable {
 		if (size < fc.size()) {
 			fc.truncate(size);
 			markDirty();
-			setLastModified(Instant.now());
+			setLastModified(Instant.now().truncatedTo(ChronoUnit.SECONDS));
 		} else if (size > fc.size()) {
 			assert size > 0;
 			markPopulatedIfGrowing(size);
 			fc.write(ByteBuffer.allocateDirect(1), size - 1);
 			markDirty();
-			setLastModified(Instant.now());
+			setLastModified(Instant.now().truncatedTo(ChronoUnit.SECONDS));
 		} else {
 			assert size == fc.size();
 			// no-op

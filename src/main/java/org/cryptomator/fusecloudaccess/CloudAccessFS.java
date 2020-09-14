@@ -28,6 +28,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.EnumSet;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -371,8 +372,8 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	private CompletionStage<Integer> createInternal(CloudPath path, long mode, FuseFileInfo fi) {
-		var modifiedDate = Instant.now();
-		return provider.write(path, false, InputStream.nullInputStream(), 0l, Optional.of(Instant.now()), ProgressListener.NO_PROGRESS_AWARE) //
+		var modifiedDate = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+		return provider.write(path, false, InputStream.nullInputStream(), 0l, Optional.of(modifiedDate), ProgressListener.NO_PROGRESS_AWARE) //
 				.handle((nullReturn, exception) -> {
 					if (exception == null) {
 						return createInternalNonExisting(path, mode, fi, modifiedDate);
@@ -543,7 +544,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	private void truncateInternal(CloudPath path, long size) throws IOException {
-		var fileHandle = openFileFactory.open(path, EnumSet.of(OpenFlags.O_WRONLY), size, Instant.now());
+		var fileHandle = openFileFactory.open(path, EnumSet.of(OpenFlags.O_WRONLY), size, Instant.now().truncatedTo(ChronoUnit.SECONDS));
 		openFileFactory.get(fileHandle).get().truncate(size);
 		openFileFactory.close(fileHandle);
 	}
