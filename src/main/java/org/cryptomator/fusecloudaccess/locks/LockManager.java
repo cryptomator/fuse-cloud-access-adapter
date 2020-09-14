@@ -4,9 +4,12 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.cache.RemovalNotification;
+import org.cryptomator.fusecloudaccess.FileSystemScoped;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.inject.Inject;
+import javax.inject.Singleton;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -36,6 +39,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  *     }
  * </pre>
  */
+@FileSystemScoped
 public class LockManager {
 
 	private static final Logger LOG = LoggerFactory.getLogger(LockManager.class);
@@ -43,6 +47,7 @@ public class LockManager {
 	private final LoadingCache<List<String>, ReadWriteLock> pathLocks;
 	private final LoadingCache<List<String>, ReadWriteLock> dataLocks;
 
+	@Inject
 	public LockManager() {
 		CacheBuilder<Object, Object> cacheBuilder = CacheBuilder.newBuilder().weakValues();
 		if (LOG.isDebugEnabled()) {

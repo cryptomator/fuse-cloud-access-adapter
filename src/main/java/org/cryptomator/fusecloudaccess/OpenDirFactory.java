@@ -5,11 +5,13 @@ import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.inject.Inject;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
 
+@FileSystemScoped
 class OpenDirFactory {
 
 	private static final Logger LOG = LoggerFactory.getLogger(OpenDirFactory.class);
@@ -18,12 +20,13 @@ class OpenDirFactory {
 	private final AtomicLong fileHandleGen = new AtomicLong();
 	private final CloudProvider provider;
 
+	@Inject
 	public OpenDirFactory(CloudProvider provider) {
 		this.provider = provider;
 	}
 
 	/**
-	 * @param path  path of the dir to open
+	 * @param path path of the dir to open
 	 * @return file handle used to identify and close open files.
 	 */
 	public long open(CloudPath path) {
