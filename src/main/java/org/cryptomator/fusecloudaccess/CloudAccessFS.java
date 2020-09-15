@@ -422,9 +422,9 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 				});
 	}
 
+	//This must be implemented, otherwise certain applications (e.g. TextEdit.app) fail to save text files.
 	@Override
 	public int chmod(String path, long mode) {
-		// TODO: This must be implemented! Otherwise TextEdit.app fails to save text files.
 		LOG.trace("chmod {} (mode: {})", path, mode);
 		return 0;
 	}
