@@ -67,11 +67,10 @@ class OpenFile implements Closeable {
 	 * @param tmpFilePath         Where to store the volatile cache
 	 * @param provider            The cloud provider used to load and persist file contents
 	 * @param initialSize         Must be 0 for newly created files. (Use {@link #truncate(long)} if you want to grow it)
-	 * @param initialLastModified The initial modification date to report until further writes happen
 	 * @return The created file
 	 * @throws IOException I/O errors during creation of the cache file located at <code>tmpFilePath</code>
 	 */
-	public static OpenFile create(CloudPath path, Path tmpFilePath, CloudProvider provider, long initialSize, Instant initialLastModified) throws IOException {
+	public static OpenFile create(CloudPath path, Path tmpFilePath, CloudProvider provider, long initialSize) throws IOException {
 		var fc = AsynchronousFileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE, DELETE_ON_CLOSE);
 		if (initialSize > 0) {
 			try {
@@ -83,7 +82,7 @@ class OpenFile implements Closeable {
 				throw new IOException("Failed to create file", e);
 			}
 		}
-		return new OpenFile(path, new CompletableAsynchronousFileChannel(fc), provider, TreeRangeSet.create(), initialLastModified);
+		return new OpenFile(path, new CompletableAsynchronousFileChannel(fc), provider, TreeRangeSet.create(), Instant.now());
 	}
 
 	public AtomicInteger getOpenFileHandleCount() {

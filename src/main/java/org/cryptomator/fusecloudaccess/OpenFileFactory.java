@@ -64,7 +64,7 @@ class OpenFileFactory {
 		try {
 			var openFile = openFiles.compute(path, (p, file) -> {
 				if (file == null) {
-					file = createOpenFile(p, initialSize, lastModified); // TODO remove redundant lastModified?
+					file = createOpenFile(p, initialSize);
 				}
 				file.getOpenFileHandleCount().incrementAndGet();
 				file.setLastModified(lastModified);
@@ -82,10 +82,10 @@ class OpenFileFactory {
 	}
 
 	//visible for testing
-	OpenFile createOpenFile(CloudPath path, long initialSize, Instant lastModified) {
+	OpenFile createOpenFile(CloudPath path, long initialSize) {
 		try {
 			var tmpFile = cacheDir.resolve(UUID.randomUUID().toString());
-			return OpenFile.create(path, tmpFile, provider, initialSize, lastModified);
+			return OpenFile.create(path, tmpFile, provider, initialSize);
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}
