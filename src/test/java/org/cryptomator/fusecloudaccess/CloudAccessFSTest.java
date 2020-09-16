@@ -571,7 +571,7 @@ public class CloudAccessFSTest {
 
 		@DisplayName("write() returns 0 on success")
 		@Test
-		public void testSuccessfulReadReturnsZero() throws IOException {
+		public void testOnSuccessReturnsZero() throws IOException {
 			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(openFile));
 			Mockito.when(openFile.write(buf, 1l, 2l)).thenReturn(CompletableFuture.completedFuture(0));
 
@@ -592,7 +592,7 @@ public class CloudAccessFSTest {
 
 		@ParameterizedTest(name = "write() returns EIO on any other exception (expected or not)")
 		@ValueSource(classes = {CloudProviderException.class, RuntimeException.class})
-		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws ReflectiveOperationException, IOException {
+		public void testOnAnyOtherExceptionReturnEIO(Class<Exception> exceptionClass) throws ReflectiveOperationException, IOException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
 			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(openFile));
 			Mockito.when(openFile.write(buf, 1l, 2l)).thenReturn(CompletableFuture.failedFuture(e));
