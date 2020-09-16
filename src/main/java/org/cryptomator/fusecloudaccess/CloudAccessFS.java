@@ -102,6 +102,19 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	@Override
+	public Pointer init(Pointer conn) {
+		returnOrTimeout(initInternal());
+		return null;
+	}
+
+	private CompletionStage<Integer> initInternal() {
+		return provider.createFolderIfNonExisting(uploadDir).exceptionally(e -> {
+			LOG.error("init() failed: Unable to create/use tmp upload directory. Local changes won't be uploaded and always moved to TODO.", e); //TODO: add lostAndFound Dir
+			return null;
+		}).thenApply(ignored -> 0);
+	}
+
+	@Override
 	public int statfs(String path, Statvfs stbuf) {
 		long total = 1_000_000_000; // 1 GB TODO: get info from cloud or config
 		long avail = 500_000_000; // 500 MB TODO: get info from cloud or config
