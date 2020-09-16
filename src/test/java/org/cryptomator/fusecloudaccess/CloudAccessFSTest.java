@@ -50,7 +50,6 @@ public class CloudAccessFSTest {
 	private CloudProvider provider;
 	private ScheduledExecutorService scheduler;
 	private OpenFileUploader uploader;
-	private CloudPath uploadDir;
 	private OpenFileFactory fileFactory;
 	private OpenDirFactory dirFactory;
 	private LockManager lockManager;
@@ -71,11 +70,10 @@ public class CloudAccessFSTest {
 		provider = Mockito.mock(CloudProvider.class);
 		scheduler = Mockito.mock(ScheduledExecutorService.class);
 		uploader = Mockito.mock(OpenFileUploader.class);
-		uploadDir = Mockito.mock(CloudPath.class);
 		fileFactory = Mockito.mock(OpenFileFactory.class);
 		dirFactory = Mockito.mock(OpenDirFactory.class);
 		lockManager = Mockito.mock(LockManager.class);
-		cloudFs = new CloudAccessFS(provider, CloudAccessFSTest.TIMEOUT, scheduler, uploader, fileFactory, dirFactory, lockManager, uploadDir);
+		cloudFs = new CloudAccessFS(provider, CloudAccessFSTest.TIMEOUT, scheduler, uploader, fileFactory, dirFactory, lockManager, Mockito.mock(CloudPath.class));
 
 		pathLockBuilder = Mockito.mock(PathLockBuilder.class);
 		pathLock = Mockito.mock(PathLock.class);
@@ -85,7 +83,6 @@ public class CloudAccessFSTest {
 		Mockito.when(pathLockBuilder.forWriting()).thenReturn(pathLock);
 		Mockito.when(pathLock.lockDataForReading()).thenReturn(dataLock);
 		Mockito.when(pathLock.lockDataForWriting()).thenReturn(dataLock);
-		Mockito.when(uploadDir.toString()).thenReturn("somethin");
 	}
 
 	@DisplayName("test returnOrTimeout() returns expected result on regular execution")
@@ -155,16 +152,6 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(0, result);
 		}
 
-		@DisplayName("getattr() returns EACCES when path equals tmp upload dir")
-		@Test
-		public void testQueryingUploadDirReturnsEACCESS() {
-			Mockito.when(uploadDir.toString()).thenReturn(PATH.toString());
-
-			var result = cloudFs.getattr(PATH.toString(), fileStat);
-
-			Assertions.assertEquals(-ErrorCodes.EACCES(), result);
-		}
-
 		@DisplayName("getattr() returns ENOENT when resource is not found.")
 		@Test
 		public void testGetAttrReturnsENOENTIfNotFound() {
@@ -222,16 +209,6 @@ public class CloudAccessFSTest {
 
 			Assertions.assertEquals(0, result);
 			Assertions.assertEquals(expectedHandle, fi.fh.longValue());
-		}
-
-		@DisplayName("opendir() returns EACCES when path equals tmp upload dir")
-		@Test
-		public void testQueryingUploadDirReturnsEACCESS() {
-			Mockito.when(uploadDir.toString()).thenReturn(PATH.toString());
-
-			var result = cloudFs.opendir(PATH.toString(), fi);
-
-			Assertions.assertEquals(-ErrorCodes.EACCES(), result);
 		}
 
 		@DisplayName("opendir() returns ENOENT when directory not found")
@@ -303,17 +280,6 @@ public class CloudAccessFSTest {
 
 			Assertions.assertEquals(0, result);
 			Mockito.verify(dir).list(buf, filler, 0);
-		}
-
-		@DisplayName("readdir() returns EACCES when path equals tmp upload dir")
-		@Test
-		public void testQueryingUploadDirReturnsEACCESS() {
-			FuseFillDir filler = Mockito.mock(FuseFillDir.class);
-			Mockito.when(uploadDir.toString()).thenReturn(PATH.toString());
-
-			var result = cloudFs.readdir(PATH.toString(), buf, filler, 0l, fi);
-
-			Assertions.assertEquals(-ErrorCodes.EACCES(), result);
 		}
 
 		@DisplayName("readdir() returns EOVERFLOW if offset is too large")
@@ -409,16 +375,6 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(42l, fi.fh.get());
 		}
 
-		@DisplayName("open() returns EACCES when path equals tmp upload dir")
-		@Test
-		public void testQueryingUploadDirReturnsEACCESS() {
-			Mockito.when(uploadDir.toString()).thenReturn(PATH.toString());
-
-			var result = cloudFs.open(PATH.toString(), fi);
-
-			Assertions.assertEquals(-ErrorCodes.EACCES(), result);
-		}
-
 		@DisplayName("open() returns EISDIR if the path points to a directory")
 		@Test
 		public void testFolderItemTypeReturnsEISDIR() {
@@ -501,16 +457,6 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(0, result);
 		}
 
-		@DisplayName("read() returns EACCES when path equals tmp upload dir")
-		@Test
-		public void testQueryingUploadDirReturnsEACCESS() {
-			Mockito.when(uploadDir.toString()).thenReturn(PATH.toString());
-
-			var result = cloudFs.read(PATH.toString(), buf, 2l, 1l, fi);
-
-			Assertions.assertEquals(-ErrorCodes.EACCES(), result);
-		}
-
 		@DisplayName("read() returns ENOENT if resource is not found")
 		@Test
 		public void testNotFoundExceptionReturnsENOENT() {
@@ -578,16 +524,6 @@ public class CloudAccessFSTest {
 			var result = cloudFs.write(PATH.toString(), buf, 2l, 1l, fi);
 
 			Assertions.assertEquals(0, result);
-		}
-
-		@DisplayName("write() returns EACCES when path equals tmp upload dir")
-		@Test
-		public void testQueryingUploadDirReturnsEACCESS() {
-			Mockito.when(uploadDir.toString()).thenReturn(PATH.toString());
-
-			var result = cloudFs.write(PATH.toString(), buf, 2l, 1l, fi);
-
-			Assertions.assertEquals(-ErrorCodes.EACCES(), result);
 		}
 
 		@ParameterizedTest(name = "write() returns EIO on any other exception (expected or not)")
@@ -659,26 +595,6 @@ public class CloudAccessFSTest {
 			Mockito.verify(fileFactory).move(oldPath, newPath);
 		}
 
-		@DisplayName("rename() returns EACCES when old path equals tmp upload dir")
-		@Test
-		public void testQueryingUploadDirReturnsEACCESSForOldPath() {
-			Mockito.when(uploadDir.toString()).thenReturn(oldPath.toString());
-
-			var result = cloudFs.rename(oldPath.toString(), newPath.toString());
-
-			Assertions.assertEquals(-ErrorCodes.EACCES(), result);
-		}
-
-		@DisplayName("rename() returns EACCES when new path equals tmp upload dir")
-		@Test
-		public void testQueryingUploadDirReturnsEACCESSForNewPath() {
-			Mockito.when(uploadDir.toString()).thenReturn(newPath.toString());
-
-			var result = cloudFs.rename(oldPath.toString(), newPath.toString());
-
-			Assertions.assertEquals(-ErrorCodes.EACCES(), result);
-		}
-
 		@DisplayName("rename(...) returns ENOENT if cannot be found")
 		@Test
 		public void testNotFoundExceptionReturnsENOENT() {
@@ -732,16 +648,6 @@ public class CloudAccessFSTest {
 			var actualResult = cloudFs.mkdir(PATH.toString(), Mockito.anyLong());
 
 			Assertions.assertEquals(0, actualResult);
-		}
-
-		@DisplayName("mkdir() returns EACCES when path equals tmp upload dir")
-		@Test
-		public void testQueryingUploadDirReturnsEACCESS() {
-			Mockito.when(uploadDir.toString()).thenReturn(PATH.toString());
-
-			var actualResult = cloudFs.mkdir(PATH.toString(), Mockito.anyLong());
-
-			Assertions.assertEquals(-ErrorCodes.EACCES(), actualResult);
 		}
 
 		@DisplayName("mkdir(...) returns EEXISTS if target already exists")
@@ -827,16 +733,6 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(1337l, fi.fh.longValue());
 		}
 
-		@DisplayName("create() returns EACCES when path equals tmp upload dir")
-		@Test
-		public void testQueryingUploadDirReturnsEACCESS() {
-			Mockito.when(uploadDir.toString()).thenReturn(PATH.toString());
-
-			var actualResult = cloudFs.create(PATH.toString(), mode, fi);
-
-			Assertions.assertEquals(-ErrorCodes.EACCES(), actualResult);
-		}
-
 		@DisplayName("create(...) returns ENOENT on NotFoundException")
 		@Test
 		public void testNotFoundExceptionReturnsENOENT() {
@@ -882,6 +778,7 @@ public class CloudAccessFSTest {
 			Mockito.verify(pathLock).close();
 			Mockito.verify(dataLock).close();
 
+			Mockito.verify(fileFactory).delete(PATH);
 		}
 
 		@DisplayName("unlink(...) returns 0 on success")
@@ -892,17 +789,6 @@ public class CloudAccessFSTest {
 			var actualResult = cloudFs.unlink(PATH.toString());
 
 			Assertions.assertEquals(0, actualResult);
-			Mockito.verify(fileFactory).delete(PATH);
-		}
-
-		@DisplayName("unlink() returns EACCES when path equals tmp upload dir")
-		@Test
-		public void testQueryingUploadDirReturnsEACCESS() {
-			Mockito.when(uploadDir.toString()).thenReturn(PATH.toString());
-
-			var actualResult = cloudFs.unlink(PATH.toString());
-
-			Assertions.assertEquals(-ErrorCodes.EACCES(), actualResult);
 		}
 
 		@DisplayName("unlink(...) returns ENOENT if path not found")
@@ -913,7 +799,6 @@ public class CloudAccessFSTest {
 			var actualResult = cloudFs.unlink(PATH.toString());
 
 			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualResult);
-			Mockito.verify(fileFactory).delete(PATH);
 		}
 
 		@DisplayName("unlink(...) returns EIO on any other exception (expected or not)")
@@ -926,7 +811,6 @@ public class CloudAccessFSTest {
 			var actualResult = cloudFs.unlink(PATH.toString());
 
 			Assertions.assertEquals(-ErrorCodes.EIO(), actualResult);
-			Mockito.verify(fileFactory).delete(PATH);
 		}
 
 	}
@@ -942,6 +826,7 @@ public class CloudAccessFSTest {
 			Mockito.verify(pathLock).close();
 			Mockito.verify(dataLock).close();
 
+			Mockito.verify(fileFactory).deleteDescendants(PATH);
 		}
 
 		@Test
@@ -952,18 +837,6 @@ public class CloudAccessFSTest {
 			var actualResult = cloudFs.rmdir(PATH.toString());
 
 			Assertions.assertEquals(0, actualResult);
-			Mockito.verify(fileFactory).deleteDescendants(PATH);
-		}
-
-
-		@DisplayName("rmdir() returns EACCES when path equals tmp upload dir")
-		@Test
-		public void testQueryingUploadDirReturnsEACCESS() {
-			Mockito.when(uploadDir.toString()).thenReturn(PATH.toString());
-
-			var actualResult = cloudFs.rmdir(PATH.toString());
-
-			Assertions.assertEquals(-ErrorCodes.EACCES(), actualResult);
 		}
 
 		@Test
@@ -974,7 +847,6 @@ public class CloudAccessFSTest {
 			var actualResult = cloudFs.rmdir(PATH.toString());
 
 			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualResult);
-			Mockito.verify(fileFactory).deleteDescendants(PATH);
 		}
 
 		@DisplayName("rmdir() returns EIO on any other exception")
@@ -987,7 +859,6 @@ public class CloudAccessFSTest {
 			var actualResult = cloudFs.rmdir(PATH.toString());
 
 			Assertions.assertEquals(-ErrorCodes.EIO(), actualResult);
-			Mockito.verify(fileFactory).deleteDescendants(PATH);
 		}
 
 	}
