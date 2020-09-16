@@ -630,7 +630,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		} catch (AccessDeniedException e) {
 			LOG.error("opendir() failed", e);
 			return -ErrorCodes.EACCES();
-		} catch (IOException e) { //TODO: should be Exception
+		} catch (Exception e) {
 			LOG.error("truncate() failed", e);
 			return -ErrorCodes.EIO();
 		}
