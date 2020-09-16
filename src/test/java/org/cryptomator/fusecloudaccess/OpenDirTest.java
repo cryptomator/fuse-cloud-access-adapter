@@ -17,6 +17,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -32,11 +33,13 @@ public class OpenDirTest {
 	private OpenDir dir;
 	private Pointer buf;
 	private FuseFillDir filler;
+	private Predicate<String> listingFilter;
 
 	@BeforeEach
 	public void setup() {
 		provider = Mockito.mock(CloudProvider.class);
-		dir = new OpenDir(provider, path);
+		listingFilter = Mockito.mock(Predicate.class);
+		dir = new OpenDir(provider, listingFilter, path);
 		buf = Mockito.mock(Pointer.class);
 		filler = Mockito.mock(FuseFillDir.class);
 	}
@@ -50,6 +53,7 @@ public class OpenDirTest {
 		Mockito.when(provider.list(path, Optional.empty())).thenReturn(CompletableFuture.completedFuture(part1));
 		Mockito.when(provider.list(path, Optional.of("token1"))).thenReturn(CompletableFuture.completedFuture(part2));
 		Mockito.when(provider.list(path, Optional.of("token2"))).thenReturn(CompletableFuture.completedFuture(part3));
+		Mockito.when(listingFilter.test(Mockito.any())).thenReturn(true);
 
 		var futureResult = dir.list(buf, filler, 0);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
@@ -71,6 +75,7 @@ public class OpenDirTest {
 		var children = IntStream.range(0, 20_000).mapToObj(i -> m1).collect(Collectors.toList());
 		var part1 = new CloudItemList(children, Optional.empty());
 		Mockito.when(provider.list(path, Optional.empty())).thenReturn(CompletableFuture.completedFuture(part1));
+		Mockito.when(listingFilter.test(Mockito.any())).thenReturn(true);
 
 		var futureResult = dir.list(buf, filler, 0);
 		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
@@ -90,6 +95,26 @@ public class OpenDirTest {
 		Assertions.assertEquals(0, result);
 		Mockito.verify(filler).apply(buf, ".", null, 1);
 		Mockito.verifyNoMoreInteractions(filler);
+	}
+
+	@Test
+	@DisplayName("filter list for specific elements")
+	public void testFilter() {
+		var children = new CloudItemList(List.of(m1, m2, m3, m4), Optional.empty());
+		Mockito.when(provider.list(path, Optional.empty())).thenReturn(CompletableFuture.completedFuture(children));
+		Mockito.doAnswer(invocation -> {
+			String resourceName = invocation.getArgument(0);
+			return resourceName.equals("m1") || resourceName.equals("m3");
+		}).when(listingFilter).test(Mockito.any());
+
+		var futureResult = dir.list(buf, filler, 0);
+		var result = Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
+
+		Assertions.assertEquals(0, result);
+		Mockito.verify(filler).apply(Mockito.eq(buf), Mockito.eq("m1"), Mockito.any(), Mockito.anyLong());
+		Mockito.verify(filler).apply(Mockito.eq(buf), Mockito.eq("m3"), Mockito.any(), Mockito.anyLong());
+		Mockito.verify(filler, Mockito.never()).apply(Mockito.eq(buf), Mockito.eq("m2"), Mockito.any(), Mockito.anyLong());
+		Mockito.verify(filler, Mockito.never()).apply(Mockito.eq(buf), Mockito.eq("m4"), Mockito.any(), Mockito.anyLong());
 	}
 
 }

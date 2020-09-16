@@ -52,9 +52,10 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	private final OpenFileFactory openFileFactory;
 	private final OpenDirFactory openDirFactory;
 	private final LockManager lockManager;
+	private final CloudPath uploadDir;
 
 	@Inject
-	CloudAccessFS(CloudProvider provider, int timeoutMillis, ScheduledExecutorService scheduler, OpenFileUploader openFileUploader, OpenFileFactory openFileFactory, OpenDirFactory openDirFactory, LockManager lockManager) {
+	CloudAccessFS(CloudProvider provider, int timeoutMillis, ScheduledExecutorService scheduler, OpenFileUploader openFileUploader, OpenFileFactory openFileFactory, OpenDirFactory openDirFactory, LockManager lockManager, CloudPath uploadDir) {
 		this.provider = provider;
 		this.timeoutMillis = timeoutMillis;
 		this.scheduler = scheduler;
@@ -62,6 +63,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		this.openFileFactory = openFileFactory;
 		this.openDirFactory = openDirFactory;
 		this.lockManager = lockManager;
+		this.uploadDir = uploadDir;
 	}
 
 	public static CloudAccessFS createNewFileSystem(CloudProvider provider, int timeoutMillis, Path cacheDir, CloudPath uploadDir) {
@@ -96,6 +98,19 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			LOG.error("operation timed out", e);
 			return -ErrorCodes.ETIMEDOUT();
 		}
+	}
+
+	@Override
+	public Pointer init(Pointer conn) {
+		returnOrTimeout(initInternal());
+		return null;
+	}
+
+	private CompletionStage<Integer> initInternal() {
+		return provider.createFolderIfNonExisting(uploadDir).exceptionally(e -> {
+			LOG.error("init() failed: Unable to create/use tmp upload directory. Local changes won't be uploaded and always moved to TODO.", e); //TODO: add lostAndFound Dir
+			return null;
+		}).thenApply(ignored -> 0);
 	}
 
 	@Override
@@ -551,7 +566,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			truncateInternal(CloudPath.of(path), size);
 			LOG.trace("truncate {} (size: {}) [0]", path, size);
 			return 0;
-		} catch (IOException e) {
+		} catch (Exception e) {
 			LOG.error("truncate() failed", e);
 			return -ErrorCodes.EIO();
 		}

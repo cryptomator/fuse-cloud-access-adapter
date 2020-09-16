@@ -37,7 +37,7 @@ public class MirrorTest {
 				Path m = Path.of("/Volumes/" + UUID.randomUUID().toString());
 				Path c = Files.createTempDirectory("cache");
 				var cloudAccessProvider = new LocalFsCloudProvider(p);
-				var fs = CloudAccessFS.createNewFileSystem(cloudAccessProvider,1000, c, CloudPath.of("/")) ;
+				var fs = CloudAccessFS.createNewFileSystem(cloudAccessProvider,1000, c, CloudPath.of("/tmpUploadDir")) ;
 				var flags = new String[] {
 						"-ouid=" + Files.getAttribute(USER_HOME, "unix:uid"),
 						"-ogid=" + Files.getAttribute(USER_HOME, "unix:gid"),
@@ -72,7 +72,7 @@ public class MirrorTest {
 				Path c = Files.createTempDirectory("cache");
 				var cloudAccessProvider = new LocalFsCloudProvider(p);
 				CloudAccessFSComponent.Builder builder;
-				var fs = CloudAccessFS.createNewFileSystem(cloudAccessProvider,1000, c, CloudPath.of("/"));
+				var fs = CloudAccessFS.createNewFileSystem(cloudAccessProvider,1000, c, CloudPath.of("/tmpUploadDir"));
 				var flags = new String[] {
 						"-ouid=-1",
 						"-ogid=-1",

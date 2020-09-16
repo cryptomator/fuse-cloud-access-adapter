@@ -190,7 +190,7 @@ class OpenFileFactory {
 					|| activeFile.getState() != OpenFile.State.UNMODIFIED) { // file is scheduled for upload
 				return activeFile; // keep the mapping
 			} else {
-				LOG.debug("Closing idle file {}", path);
+				LOG.trace("Closing idle file {}", path);
 				activeFile.close();
 				return null; // remove mapping
 			}
