@@ -33,13 +33,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.locks.StampedLock;
 import java.util.function.Consumer;
 
 public class OpenFileUploaderTest {
 
 	private CloudProvider provider;
 	private Path cacheDir;
+	private Path lostNFoundDir;
 	private CloudPath cloudUploadDir;
 	private ExecutorService executorService;
 	private ConcurrentMap<CloudPath, Future<?>> tasks;
@@ -51,10 +51,11 @@ public class OpenFileUploaderTest {
 	public void setup() {
 		this.provider = Mockito.mock(CloudProvider.class);
 		this.cacheDir = Mockito.mock(Path.class);
+		this.lostNFoundDir = Mockito.mock(Path.class);
 		this.executorService = Mockito.mock(ExecutorService.class);
 		this.tasks = Mockito.mock(ConcurrentMap.class);
 		this.lockManager = Mockito.mock(LockManager.class);
-		this.uploader = new OpenFileUploader(provider, cacheDir, cloudUploadDir, executorService, tasks, lockManager);
+		this.uploader = new OpenFileUploader(provider, cacheDir, lostNFoundDir, cloudUploadDir, executorService, tasks, lockManager);
 		this.file = Mockito.mock(OpenFile.class);
 		this.cloudUploadDir = CloudPath.of("/upload/path/in/cloud");
 		Mockito.when(file.getState()).thenReturn(OpenFile.State.UPLOADING);
@@ -109,7 +110,7 @@ public class OpenFileUploaderTest {
 		@BeforeEach
 		public void setup() {
 			this.executorService = Executors.newSingleThreadExecutor();
-			this.uploader = new OpenFileUploader(provider, cacheDir, cloudUploadDir, executorService, tasks, lockManager);
+			this.uploader = new OpenFileUploader(provider, cacheDir, lostNFoundDir, cloudUploadDir, executorService, tasks, lockManager);
 		}
 
 		@Test
@@ -171,7 +172,7 @@ public class OpenFileUploaderTest {
 			this.onFinished = Mockito.mock(Consumer.class);
 			this.pathLockBuilder = Mockito.mock(PathLockBuilder.class);
 			this.pathLock = Mockito.mock(PathLock.class);
-			this.upload = new OpenFileUploader.ScheduledUpload(provider, openFile, onFinished, tmpDir, cloudUploadDir, lockManager);
+			this.upload = Mockito.spy(new OpenFileUploader.ScheduledUpload(provider, openFile, onFinished, tmpDir, cloudUploadDir, lockManager, lostNFoundDir));
 			Mockito.when(lockManager.createPathLock(Mockito.any())).thenReturn(pathLockBuilder);
 			Mockito.when(pathLockBuilder.forWriting()).thenReturn(pathLock);
 			Mockito.when(openFile.getState()).thenReturn(OpenFile.State.UPLOADING);
@@ -195,7 +196,7 @@ public class OpenFileUploaderTest {
 		}
 
 		@Test
-		@DisplayName("upload fails due to CloudProviderException during actual upload")
+		@DisplayName("upload fails due to CloudProviderException during actual upload and backups the tmp file")
 		public void testCloudProviderExceptionDuringUpload() throws IOException {
 			var e = new CloudProviderException("fail");
 			var cloudPath = Mockito.mock(CloudPath.class, "/path/to/file");
@@ -209,6 +210,7 @@ public class OpenFileUploaderTest {
 			Mockito.when(openFile.getSize()).thenReturn(42l);
 			Mockito.when(provider.write(Mockito.any(), Mockito.eq(true), Mockito.any(), Mockito.eq(42l), Mockito.eq(Optional.of(Instant.EPOCH)), Mockito.any()))
 					.thenReturn(CompletableFuture.failedFuture(e));
+			Mockito.doNothing().when(upload).backupFailedUploadFile(Mockito.any(Path.class));
 
 			var thrown = Assertions.assertThrows(IOException.class, () -> {
 				upload.call();
@@ -217,8 +219,28 @@ public class OpenFileUploaderTest {
 			MatcherAssert.assertThat(thrown.getCause(), CoreMatchers.instanceOf(ExecutionException.class));
 			Assertions.assertSame(e, thrown.getCause().getCause());
 			Mockito.verify(onFinished).accept(Mockito.any());
+			Mockito.verify(upload).backupFailedUploadFile(Mockito.any(Path.class));
 			Assertions.assertEquals(0l, Files.list(tmpDir).count());
 			Mockito.verifyNoMoreInteractions(lockManager);
+		}
+
+		@Test
+		@DisplayName("backup operations succeeds")
+		public void testBackupOp() throws IOException {
+			Path tmpFile = tmpDir.resolve("temp.file");
+			Files.write(tmpFile, new byte[42]);
+			var cloudPath = CloudPath.of("path/to/backup.file");
+			Path backup = tmpDir.resolve("path/to/backup.file");
+			Path backupDir = tmpDir.resolve("path/to/");
+			Mockito.when(openFile.getPath()).thenReturn(cloudPath);
+			Mockito.when(lostNFoundDir.resolve(Mockito.anyString())).thenReturn(backupDir);
+			Mockito.when(lostNFoundDir.toString()).thenReturn(backup.toString());
+			Mockito.doCallRealMethod().when(upload).backupFailedUploadFile(Mockito.any(Path.class));
+
+			upload.backupFailedUploadFile(tmpFile);
+
+			Assertions.assertTrue(Files.notExists(tmpFile));
+			Assertions.assertTrue(Files.exists(backup));
 		}
 
 		@Test

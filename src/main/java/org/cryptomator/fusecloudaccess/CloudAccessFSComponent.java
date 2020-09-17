@@ -5,6 +5,7 @@ import dagger.Component;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 
+import javax.inject.Named;
 import java.nio.file.Path;
 
 @Component(modules = CloudAccessFSModule.class)
@@ -23,7 +24,10 @@ public interface CloudAccessFSComponent {
 		Builder cloudProvider(CloudProvider cloudProvider);
 
 		@BindsInstance
-		Builder cacheDir(Path cacheDir);
+		Builder cacheDir(@Named("cacheDir") Path cacheDir);
+
+		@BindsInstance
+		Builder lostNFoundDir(@Named("lostNFoundDir") Path lostNFoundDir);
 
 		@BindsInstance
 		Builder uploadDir(CloudPath uploadDir);

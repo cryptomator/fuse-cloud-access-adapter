@@ -46,7 +46,7 @@ class OpenFileFactory {
 	private final ScheduledExecutorService scheduler;
 
 	@Inject
-	OpenFileFactory(@Named("openFiles") ConcurrentMap<CloudPath, OpenFile> openFiles, CloudProvider provider, OpenFileUploader uploader, Path cacheDir, ScheduledExecutorService scheduler) {
+	OpenFileFactory(@Named("openFiles") ConcurrentMap<CloudPath, OpenFile> openFiles, CloudProvider provider, OpenFileUploader uploader,@Named("cacheDir") Path cacheDir, ScheduledExecutorService scheduler) {
 		this.openFiles = openFiles;
 		this.fileHandles = new HashMap<>();
 		this.provider = provider;

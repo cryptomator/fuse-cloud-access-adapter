@@ -38,6 +38,7 @@ public class AccessPatternIntegrationTest {
 
 	private Path mirrored;
 	private Path cacheDir;
+	private Path lostNFound;
 	private CloudProvider provider;
 	private CloudAccessFS fs;
 
@@ -45,10 +46,11 @@ public class AccessPatternIntegrationTest {
 	void setup(@TempDir Path tmpDir) throws IOException {
 		this.mirrored = tmpDir.resolve("mirrored");
 		this.cacheDir = tmpDir.resolve("cache");
+		this.lostNFound = tmpDir.resolve("lost+Found");
 		Files.createDirectory(this.mirrored);
 		Files.createDirectory(this.cacheDir);
 		this.provider = CloudAccess.toLocalFileSystem(this.mirrored);
-		this.fs = CloudAccessFS.createNewFileSystem(provider, 1000, this.cacheDir, CloudPath.of("/"));
+		this.fs = CloudAccessFS.createNewFileSystem(provider, 1000, this.cacheDir,this.lostNFound, CloudPath.of("/"));
 	}
 
 	@Test
@@ -221,7 +223,7 @@ public class AccessPatternIntegrationTest {
 	@DisplayName("simulates \"get attributes during write\" access pattern")
 	void testGetAttributesDuringWrite() {
 		provider = CloudAccess.vaultFormat8GCMCloudAccess(CloudAccess.toLocalFileSystem(this.mirrored), CloudPath.of("/"), Base64.getDecoder().decode("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="));
-		fs = CloudAccessFS.createNewFileSystem(provider, 1000, this.cacheDir, CloudPath.of("/"));
+		fs = CloudAccessFS.createNewFileSystem(provider, 1000, this.cacheDir, this.lostNFound, CloudPath.of("/"));
 
 		var path = "/foo.txt";
 

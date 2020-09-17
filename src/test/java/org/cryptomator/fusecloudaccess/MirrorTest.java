@@ -1,18 +1,18 @@
 package org.cryptomator.fusecloudaccess;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.Scanner;
-import java.util.UUID;
-
 import com.google.common.base.Preconditions;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.localfs.LocalFsCloudProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.impl.SimpleLogger;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Scanner;
+import java.util.UUID;
 
 public class MirrorTest {
 
@@ -36,8 +36,9 @@ public class MirrorTest {
 				Path p = Path.of(scanner.nextLine());
 				Path m = Path.of("/Volumes/" + UUID.randomUUID().toString());
 				Path c = Files.createTempDirectory("cache");
+				Path l = Files.createTempDirectory("lost+found");
 				var cloudAccessProvider = new LocalFsCloudProvider(p);
-				var fs = CloudAccessFS.createNewFileSystem(cloudAccessProvider,1000, c, CloudPath.of("/tmpUploadDir")) ;
+				var fs = CloudAccessFS.createNewFileSystem(cloudAccessProvider, 1000, c, l, CloudPath.of("/tmpUploadDir"));
 				var flags = new String[] {
 						"-ouid=" + Files.getAttribute(USER_HOME, "unix:uid"),
 						"-ogid=" + Files.getAttribute(USER_HOME, "unix:gid"),
@@ -70,16 +71,17 @@ public class MirrorTest {
 				System.out.println("Enter path to the not-existent directory you want to use as mountpoint :");
 				Path m = Paths.get(scanner.nextLine());
 				Path c = Files.createTempDirectory("cache");
+				Path l = Files.createTempDirectory("lost+found");
 				var cloudAccessProvider = new LocalFsCloudProvider(p);
 				CloudAccessFSComponent.Builder builder;
-				var fs = CloudAccessFS.createNewFileSystem(cloudAccessProvider,1000, c, CloudPath.of("/tmpUploadDir"));
+				var fs = CloudAccessFS.createNewFileSystem(cloudAccessProvider, 1000, c, l, CloudPath.of("/tmpUploadDir"));
 				var flags = new String[] {
 						"-ouid=-1",
 						"-ogid=-1",
 						"-oauto_unmount",
 						"-oauto_cache",
 						"-ovolname=CloudAccessMirror",
-						"-odefault_permissions" // let the kernel assume permissions based on file attributes etc
+						"-odefault_permissions", // let the kernel assume permissions based on file attributes etc
 				};
 				//mount
 				LOG.info("Mounting FUSE file system at {}...", m);

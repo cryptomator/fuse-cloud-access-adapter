@@ -14,7 +14,9 @@ import javax.inject.Named;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -40,19 +42,21 @@ class OpenFileUploader {
 
 	private final CloudProvider provider;
 	private final Path cacheDir;
+	private final Path lostNFoundDir;
 	private final CloudPath cloudUploadDir;
 	private final ExecutorService executorService;
 	private final ConcurrentMap<CloudPath, Future<?>> tasks;
 	private final LockManager lockManager;
 
 	@Inject
-	OpenFileUploader(CloudProvider provider, Path cacheDir, CloudPath cloudUploadDir, ExecutorService executorService, @Named("uploadTasks") ConcurrentMap<CloudPath, Future<?>> tasks, LockManager lockManager) {
+	OpenFileUploader(CloudProvider provider, @Named("cacheDir") Path cacheDir, @Named("lostNFoundDir") Path lostNFoundDir, CloudPath cloudUploadDir, ExecutorService executorService, @Named("uploadTasks") ConcurrentMap<CloudPath, Future<?>> tasks, LockManager lockManager) {
 		this.provider = provider;
 		this.cacheDir = cacheDir;
 		this.cloudUploadDir = cloudUploadDir;
 		this.executorService = executorService;
 		this.tasks = tasks;
 		this.lockManager = lockManager;
+		this.lostNFoundDir = lostNFoundDir;
 	}
 
 	/**
@@ -73,7 +77,7 @@ class OpenFileUploader {
 				scheduleUpload(file, onFinished);
 			}
 		};
-		var task = executorService.submit(new ScheduledUpload(provider, file, decoratedOnFinished, cacheDir, cloudUploadDir, lockManager));
+		var task = executorService.submit(new ScheduledUpload(provider, file, decoratedOnFinished, cacheDir, cloudUploadDir, lockManager, lostNFoundDir));
 		var previousTask = tasks.put(file.getPath(), task);
 		assert previousTask == null : "Must not schedule new upload before finishing previous one";
 	}
@@ -111,14 +115,16 @@ class OpenFileUploader {
 		private final Path cacheDir;
 		private final CloudPath cloudUploadDir;
 		private final LockManager lockManager;
+		private final Path lostAndFoundDir;
 
-		public ScheduledUpload(CloudProvider provider, OpenFile openFile, Consumer<OpenFile> onFinished, Path cacheDir, CloudPath cloudUploadDir, LockManager lockManager) {
+		public ScheduledUpload(CloudProvider provider, OpenFile openFile, Consumer<OpenFile> onFinished, Path cacheDir, CloudPath cloudUploadDir, LockManager lockManager, Path lostNFoundDir) {
 			this.provider = provider;
 			this.openFile = openFile;
 			this.onFinished = onFinished;
 			this.cacheDir = cacheDir;
 			this.cloudUploadDir = cloudUploadDir;
 			this.lockManager = lockManager;
+			this.lostAndFoundDir = lostNFoundDir;
 		}
 
 		@Override
@@ -155,12 +161,28 @@ class OpenFileUploader {
 				Thread.currentThread().interrupt();
 				throw new InterruptedIOException("Upload interrupted.");
 			} catch (ExecutionException e) {
-				LOG.error("Upload of " + openFile.getPath() + " failed.", e);
-				// TODO copy file to some lost+found dir
+				LOG.warn("Upload of " + openFile.getPath() + " failed. Attempting backup...", e);
+				backupFailedUploadFile(localTmpFile);
 				throw new IOException("Upload failed.", e);
 			} finally {
 				Files.deleteIfExists(localTmpFile);
 				onFinished.accept(openFile);
+			}
+		}
+
+		//visible for testing
+		void backupFailedUploadFile(Path localTmpFile) {
+			try {
+				if (Files.notExists(localTmpFile)) {
+					throw new NoSuchFileException("Unable to find persisted file " + localTmpFile.toString());
+				}
+				final var realCloudPath = openFile.getPath();
+				var targetDir = lostAndFoundDir.resolve(realCloudPath.subpath(0, realCloudPath.getNameCount() - 1).toString());
+				Files.createDirectories(targetDir);
+				Files.move(localTmpFile, targetDir.resolve(realCloudPath.getFileName().toString()), StandardCopyOption.REPLACE_EXISTING);
+				LOG.info("Backup of {} to {} successful.", realCloudPath, lostAndFoundDir);
+			} catch (IOException e2) {
+				LOG.error("Backup of " + openFile.getPath() + " to " + lostAndFoundDir + " failed. DATA LOSS IMMINENT.", e2);
 			}
 		}
 

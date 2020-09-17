@@ -66,11 +66,12 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		this.uploadDir = uploadDir;
 	}
 
-	public static CloudAccessFS createNewFileSystem(CloudProvider provider, int timeoutMillis, Path cacheDir, CloudPath uploadDir) {
+	public static CloudAccessFS createNewFileSystem(CloudProvider provider, int timeoutMillis, Path cacheDir, Path lostNFoundDir, CloudPath uploadDir) {
 		return DaggerCloudAccessFSComponent.builder() //
 				.cloudProvider(provider) //
 				.timeoutInMillis(timeoutMillis) //
 				.cacheDir(cacheDir) //
+				.lostNFoundDir(lostNFoundDir)
 				.uploadDir(uploadDir) //
 				.build() //
 				.filesystem();
