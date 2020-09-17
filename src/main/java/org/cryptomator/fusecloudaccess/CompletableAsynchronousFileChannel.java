@@ -14,7 +14,7 @@ import java.util.concurrent.CompletableFuture;
 
 class CompletableAsynchronousFileChannel implements Closeable {
 
-	private static final int BUFFER_SIZE = 4 * 1024 * 1024; // 4 MiB
+	private static final int BUFFER_SIZE = 4 * 1024 * 1024; // 4 MiB TODO: should this be configurable?
 
 	private final AsynchronousFileChannel fc;
 

@@ -49,14 +49,14 @@ class OpenFileUploader {
 	private final LockManager lockManager;
 
 	@Inject
-	OpenFileUploader(CloudProvider provider, @Named("cacheDir") Path cacheDir, @Named("lostNFoundDir") Path lostNFoundDir, CloudPath cloudUploadDir, ExecutorService executorService, @Named("uploadTasks") ConcurrentMap<CloudPath, Future<?>> tasks, LockManager lockManager) {
+	OpenFileUploader(CloudProvider provider, CloudAccessFSConfig config, CloudPath cloudUploadDir, ExecutorService executorService, @Named("uploadTasks") ConcurrentMap<CloudPath, Future<?>> tasks, LockManager lockManager) {
 		this.provider = provider;
-		this.cacheDir = cacheDir;
+		this.cacheDir = config.getCacheDir();
 		this.cloudUploadDir = cloudUploadDir;
 		this.executorService = executorService;
 		this.tasks = tasks;
 		this.lockManager = lockManager;
-		this.lostNFoundDir = lostNFoundDir;
+		this.lostNFoundDir = config.getLostNFoundDir();
 	}
 
 	/**
@@ -107,7 +107,7 @@ class OpenFileUploader {
 		}
 	}
 
-	static class ScheduledUpload implements Callable<Void> {
+	static class ScheduledUpload implements Callable<Void> { //TODO: maybe remove static modifier
 
 		private final CloudProvider provider;
 		private final OpenFile openFile;
