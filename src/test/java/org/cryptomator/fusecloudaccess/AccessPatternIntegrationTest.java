@@ -71,7 +71,7 @@ public class AccessPatternIntegrationTest {
 		fs.mkdir("/foo.txt-temp3000", 0755);
 
 		// wait a bit (so that we can check if st_mtim updated)
-		Thread.sleep(100);
+		Thread.sleep(2000);
 
 		// echo "asdasd" > foo.txt-temp3000/foo.txt
 		FuseFileInfo fi2 = TestFileInfo.create();
@@ -141,7 +141,7 @@ public class AccessPatternIntegrationTest {
 		fs.mkdir("/foo.txt-temp3000", 0755);
 
 		// wait a bit (so that we can check if st_mtim updated)
-		Thread.sleep(100);
+		Thread.sleep(2000);
 
 		// echo "asdasd" > foo.txt-temp3000/foo.txt
 		FuseFileInfo fi3 = TestFileInfo.create();
