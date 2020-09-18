@@ -39,8 +39,9 @@ public class OpenFileUploaderTest {
 
 	private CloudProvider provider;
 	private Path cacheDir;
-	private Path lostNFoundDir;
+	private Path lostAndFoundDir;
 	private CloudPath cloudUploadDir;
+	private CloudAccessFSConfig config;
 	private ExecutorService executorService;
 	private ConcurrentMap<CloudPath, Future<?>> tasks;
 	private LockManager lockManager;
@@ -51,14 +52,18 @@ public class OpenFileUploaderTest {
 	public void setup() {
 		this.provider = Mockito.mock(CloudProvider.class);
 		this.cacheDir = Mockito.mock(Path.class);
-		this.lostNFoundDir = Mockito.mock(Path.class);
+		this.lostAndFoundDir = Mockito.mock(Path.class);
+		this.cloudUploadDir = CloudPath.of("/upload/path/in/cloud");
+		this.config = Mockito.mock(CloudAccessFSConfig.class);
 		this.executorService = Mockito.mock(ExecutorService.class);
 		this.tasks = Mockito.mock(ConcurrentMap.class);
 		this.lockManager = Mockito.mock(LockManager.class);
-		this.uploader = new OpenFileUploader(provider, cacheDir, lostNFoundDir, cloudUploadDir, executorService, tasks, lockManager);
+		this.uploader = new OpenFileUploader(provider, config, executorService, tasks, lockManager);
 		this.file = Mockito.mock(OpenFile.class);
-		this.cloudUploadDir = CloudPath.of("/upload/path/in/cloud");
 		Mockito.when(file.getState()).thenReturn(OpenFile.State.UPLOADING);
+		Mockito.when(config.getCacheDir()).thenReturn(cacheDir);
+		Mockito.when(config.getLostAndFoundDir()).thenReturn(lostAndFoundDir);
+		Mockito.when(config.getUploadDir()).thenReturn(cloudUploadDir);
 	}
 
 
@@ -110,7 +115,7 @@ public class OpenFileUploaderTest {
 		@BeforeEach
 		public void setup() {
 			this.executorService = Executors.newSingleThreadExecutor();
-			this.uploader = new OpenFileUploader(provider, cacheDir, lostNFoundDir, cloudUploadDir, executorService, tasks, lockManager);
+			this.uploader = new OpenFileUploader(provider, config, executorService, tasks, lockManager);
 		}
 
 		@Test
@@ -157,7 +162,6 @@ public class OpenFileUploaderTest {
 	public class ScheduledUploadTest {
 
 		private Path tmpDir;
-		private CloudProvider provider;
 		private OpenFile openFile;
 		private Consumer<OpenFile> onFinished;
 		private OpenFileUploader.ScheduledUpload upload;
@@ -167,15 +171,15 @@ public class OpenFileUploaderTest {
 		@BeforeEach
 		public void setup(@TempDir Path tmpDir) {
 			this.tmpDir = tmpDir;
-			this.provider = Mockito.mock(CloudProvider.class);
 			this.openFile = Mockito.mock(OpenFile.class);
 			this.onFinished = Mockito.mock(Consumer.class);
 			this.pathLockBuilder = Mockito.mock(PathLockBuilder.class);
 			this.pathLock = Mockito.mock(PathLock.class);
-			this.upload = Mockito.spy(new OpenFileUploader.ScheduledUpload(provider, openFile, onFinished, tmpDir, cloudUploadDir, lockManager, lostNFoundDir));
+			this.upload = Mockito.spy(uploader.new ScheduledUpload(openFile, onFinished));
 			Mockito.when(lockManager.createPathLock(Mockito.any())).thenReturn(pathLockBuilder);
 			Mockito.when(pathLockBuilder.forWriting()).thenReturn(pathLock);
 			Mockito.when(openFile.getState()).thenReturn(OpenFile.State.UPLOADING);
+			Mockito.when(config.getCacheDir()).thenReturn(tmpDir);
 		}
 
 		@Test
@@ -233,8 +237,8 @@ public class OpenFileUploaderTest {
 			Path backup = tmpDir.resolve("path/to/backup.file");
 			Path backupDir = tmpDir.resolve("path/to/");
 			Mockito.when(openFile.getPath()).thenReturn(cloudPath);
-			Mockito.when(lostNFoundDir.resolve(Mockito.anyString())).thenReturn(backupDir);
-			Mockito.when(lostNFoundDir.toString()).thenReturn(backup.toString());
+			Mockito.when(lostAndFoundDir.resolve(Mockito.anyString())).thenReturn(backupDir);
+			Mockito.when(lostAndFoundDir.toString()).thenReturn(backup.toString());
 			Mockito.doCallRealMethod().when(upload).backupFailedUploadFile(Mockito.any(Path.class));
 
 			upload.backupFailedUploadFile(tmpFile);

@@ -26,7 +26,6 @@ import ru.serce.jnrfuse.struct.Statvfs;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.EnumSet;
@@ -46,33 +45,27 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	private static final int BLOCKSIZE = 4096;
 
 	private final CloudProvider provider;
-	private final int timeoutMillis;
+	private final CloudAccessFSConfig config;
 	private final ScheduledExecutorService scheduler;
 	private final OpenFileUploader openFileUploader;
 	private final OpenFileFactory openFileFactory;
 	private final OpenDirFactory openDirFactory;
 	private final LockManager lockManager;
-	private final CloudPath uploadDir;
 
 	@Inject
-	CloudAccessFS(CloudProvider provider, int timeoutMillis, ScheduledExecutorService scheduler, OpenFileUploader openFileUploader, OpenFileFactory openFileFactory, OpenDirFactory openDirFactory, LockManager lockManager, CloudPath uploadDir) {
+	CloudAccessFS(CloudProvider provider, CloudAccessFSConfig config, ScheduledExecutorService scheduler, OpenFileUploader openFileUploader, OpenFileFactory openFileFactory, OpenDirFactory openDirFactory, LockManager lockManager) {
 		this.provider = provider;
-		this.timeoutMillis = timeoutMillis;
+		this.config = config;
 		this.scheduler = scheduler;
 		this.openFileUploader = openFileUploader;
 		this.openFileFactory = openFileFactory;
 		this.openDirFactory = openDirFactory;
 		this.lockManager = lockManager;
-		this.uploadDir = uploadDir;
 	}
 
-	public static CloudAccessFS createNewFileSystem(CloudProvider provider, int timeoutMillis, Path cacheDir, Path lostNFoundDir, CloudPath uploadDir) {
+	public static CloudAccessFS createNewFileSystem(CloudProvider provider) {
 		return DaggerCloudAccessFSComponent.builder() //
 				.cloudProvider(provider) //
-				.timeoutInMillis(timeoutMillis) //
-				.cacheDir(cacheDir) //
-				.lostNFoundDir(lostNFoundDir)
-				.uploadDir(uploadDir) //
 				.build() //
 				.filesystem();
 	}
@@ -87,7 +80,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	 */
 	int returnOrTimeout(CompletionStage<Integer> returnCode) {
 		try {
-			return returnCode.toCompletableFuture().get(timeoutMillis, TimeUnit.MILLISECONDS);
+			return returnCode.toCompletableFuture().get(config.getProviderResponseTimeoutSeconds(), TimeUnit.SECONDS);
 		} catch (InterruptedException e) {
 			LOG.warn("async call interrupted");
 			Thread.currentThread().interrupt();
@@ -108,8 +101,8 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	private CompletionStage<Integer> initInternal() {
-		return provider.createFolderIfNonExisting(uploadDir).exceptionally(e -> {
-			LOG.error("init() failed: Unable to create/use tmp upload directory. Local changes won't be uploaded and always moved to TODO.", e); //TODO: add lostAndFound Dir
+		return provider.createFolderIfNonExisting(config.getUploadDir()).exceptionally(e -> {
+			LOG.error("init() failed: Unable to create/use tmp upload directory. Local changes won't be uploaded and always moved to " + config.getLostAndFoundDir() + ".", e);
 			return null;
 		}).thenApply(ignored -> 0);
 	}
@@ -607,7 +600,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		try {
 			while (true) {
 				try {
-					openFileUploader.awaitPendingUploads(30, TimeUnit.SECONDS); // TODO make configurable
+					openFileUploader.awaitPendingUploads(config.getPendingUploadTimeoutSeconds(), TimeUnit.SECONDS);
 					break;
 				} catch (TimeoutException e) {
 					LOG.debug("Still uploading...");

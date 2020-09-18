@@ -27,6 +27,7 @@ public class OpenFileFactoryTest {
 
 	private ConcurrentMap<CloudPath, OpenFile> activeFiles = new ConcurrentHashMap<>();
 	private CloudProvider provider = Mockito.mock(CloudProvider.class);
+	private CloudAccessFSConfig config = Mockito.mock(CloudAccessFSConfig.class);
 	private OpenFileUploader uploader = Mockito.mock(OpenFileUploader.class);
 	private ScheduledExecutorService scheduler = Mockito.mock(ScheduledExecutorService.class);
 	private OpenFileFactory openFileFactory;
@@ -34,7 +35,8 @@ public class OpenFileFactoryTest {
 
 	@BeforeEach
 	public void setup(@TempDir Path tmpDir) {
-		openFileFactory = new OpenFileFactory(activeFiles, provider, uploader, tmpDir, scheduler);
+		Mockito.when(config.getCacheDir()).thenReturn(tmpDir);
+		openFileFactory = new OpenFileFactory(activeFiles, provider, config, uploader, scheduler);
 		openFile = Mockito.mock(OpenFile.class);
 		activeFiles.put(PATH, openFile);
 		Mockito.when(openFile.getOpenFileHandleCount()).thenReturn(new AtomicInteger(0));

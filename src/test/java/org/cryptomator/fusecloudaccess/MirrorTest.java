@@ -37,8 +37,10 @@ public class MirrorTest {
 				Path m = Path.of("/Volumes/" + UUID.randomUUID().toString());
 				Path c = Files.createTempDirectory("cache");
 				Path l = Files.createTempDirectory("lost+found");
+				System.setProperty("org.cryptomator.fusecloudaccess.cacheDir", c.toString());
+				System.setProperty("org.cryptomator.fusecloudaccess.lostAndFoundDir", l.toString());
 				var cloudAccessProvider = new LocalFsCloudProvider(p);
-				var fs = CloudAccessFS.createNewFileSystem(cloudAccessProvider, 1000, c, l, CloudPath.of("/tmpUploadDir"));
+				var fs = CloudAccessFS.createNewFileSystem(cloudAccessProvider);
 				var flags = new String[] {
 						"-ouid=" + Files.getAttribute(USER_HOME, "unix:uid"),
 						"-ogid=" + Files.getAttribute(USER_HOME, "unix:gid"),
@@ -72,9 +74,10 @@ public class MirrorTest {
 				Path m = Paths.get(scanner.nextLine());
 				Path c = Files.createTempDirectory("cache");
 				Path l = Files.createTempDirectory("lost+found");
+				System.setProperty("org.cryptomator.fusecloudaccess.cacheDir", c.toString());
+				System.setProperty("org.cryptomator.fusecloudaccess.lostAndFoundDir", l.toString());
 				var cloudAccessProvider = new LocalFsCloudProvider(p);
-				CloudAccessFSComponent.Builder builder;
-				var fs = CloudAccessFS.createNewFileSystem(cloudAccessProvider, 1000, c, l, CloudPath.of("/tmpUploadDir"));
+				var fs = CloudAccessFS.createNewFileSystem(cloudAccessProvider);
 				var flags = new String[] {
 						"-ouid=-1",
 						"-ogid=-1",

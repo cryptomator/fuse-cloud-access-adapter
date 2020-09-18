@@ -31,7 +31,6 @@ class OpenFileFactory {
 
 	private static final AtomicLong FILE_HANDLE_GEN = new AtomicLong();
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFileFactory.class);
-	private static final int KEEP_IDLE_FILE_SECONDS = 10; // TODO make configurable
 
 	/*
 	 * activeFiles.compute is the primary barrier for synchronized access when creating/closing/moving OpenFiles
@@ -44,15 +43,17 @@ class OpenFileFactory {
 	private final OpenFileUploader uploader;
 	private final Path cacheDir;
 	private final ScheduledExecutorService scheduler;
+	private final int keepIdleFileSeconds;
 
 	@Inject
-	OpenFileFactory(@Named("openFiles") ConcurrentMap<CloudPath, OpenFile> openFiles, CloudProvider provider, OpenFileUploader uploader,@Named("cacheDir") Path cacheDir, ScheduledExecutorService scheduler) {
+	OpenFileFactory(@Named("openFiles") ConcurrentMap<CloudPath, OpenFile> openFiles, CloudProvider provider, CloudAccessFSConfig config, OpenFileUploader uploader, ScheduledExecutorService scheduler) {
 		this.openFiles = openFiles;
 		this.fileHandles = new HashMap<>();
 		this.provider = provider;
 		this.uploader = uploader;
-		this.cacheDir = cacheDir;
+		this.cacheDir = config.getCacheDir();
 		this.scheduler = scheduler;
+		this.keepIdleFileSeconds = config.getCacheTimeoutSeconds();
 	}
 
 	/**
@@ -181,7 +182,7 @@ class OpenFileFactory {
 	}
 
 	private void scheduleClose(OpenFile file) {
-		scheduler.schedule(() -> closeFileIfIdle(file.getPath()), KEEP_IDLE_FILE_SECONDS, TimeUnit.SECONDS);
+		scheduler.schedule(() -> closeFileIfIdle(file.getPath()), keepIdleFileSeconds, TimeUnit.SECONDS);
 	}
 
 	private void closeFileIfIdle(CloudPath path) {

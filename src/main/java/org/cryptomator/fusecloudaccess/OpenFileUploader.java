@@ -41,22 +41,18 @@ class OpenFileUploader {
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFileUploader.class);
 
 	private final CloudProvider provider;
-	private final Path cacheDir;
-	private final Path lostNFoundDir;
-	private final CloudPath cloudUploadDir;
+	private final CloudAccessFSConfig config;
 	private final ExecutorService executorService;
 	private final ConcurrentMap<CloudPath, Future<?>> tasks;
 	private final LockManager lockManager;
 
 	@Inject
-	OpenFileUploader(CloudProvider provider, @Named("cacheDir") Path cacheDir, @Named("lostNFoundDir") Path lostNFoundDir, CloudPath cloudUploadDir, ExecutorService executorService, @Named("uploadTasks") ConcurrentMap<CloudPath, Future<?>> tasks, LockManager lockManager) {
+	OpenFileUploader(CloudProvider provider, CloudAccessFSConfig config, ExecutorService executorService, @Named("uploadTasks") ConcurrentMap<CloudPath, Future<?>> tasks, LockManager lockManager) {
 		this.provider = provider;
-		this.cacheDir = cacheDir;
-		this.cloudUploadDir = cloudUploadDir;
+		this.config = config;
 		this.executorService = executorService;
 		this.tasks = tasks;
 		this.lockManager = lockManager;
-		this.lostNFoundDir = lostNFoundDir;
 	}
 
 	/**
@@ -77,7 +73,7 @@ class OpenFileUploader {
 				scheduleUpload(file, onFinished);
 			}
 		};
-		var task = executorService.submit(new ScheduledUpload(provider, file, decoratedOnFinished, cacheDir, cloudUploadDir, lockManager, lostNFoundDir));
+		var task = executorService.submit(new ScheduledUpload(file, decoratedOnFinished));
 		var previousTask = tasks.put(file.getPath(), task);
 		assert previousTask == null : "Must not schedule new upload before finishing previous one";
 	}
@@ -107,32 +103,22 @@ class OpenFileUploader {
 		}
 	}
 
-	static class ScheduledUpload implements Callable<Void> {
+	class ScheduledUpload implements Callable<Void> {
 
-		private final CloudProvider provider;
 		private final OpenFile openFile;
 		private final Consumer<OpenFile> onFinished;
-		private final Path cacheDir;
-		private final CloudPath cloudUploadDir;
-		private final LockManager lockManager;
-		private final Path lostAndFoundDir;
 
-		public ScheduledUpload(CloudProvider provider, OpenFile openFile, Consumer<OpenFile> onFinished, Path cacheDir, CloudPath cloudUploadDir, LockManager lockManager, Path lostNFoundDir) {
-			this.provider = provider;
+		public ScheduledUpload(OpenFile openFile, Consumer<OpenFile> onFinished) {
 			this.openFile = openFile;
 			this.onFinished = onFinished;
-			this.cacheDir = cacheDir;
-			this.cloudUploadDir = cloudUploadDir;
-			this.lockManager = lockManager;
-			this.lostAndFoundDir = lostNFoundDir;
 		}
 
 		@Override
 		public Void call() throws IOException {
 			assert openFile.getState() == OpenFile.State.UPLOADING;
 			String tmpFileName = UUID.randomUUID() + ".tmp";
-			Path localTmpFile = cacheDir.resolve(tmpFileName);
-			CloudPath cloudTmpFile = cloudUploadDir.resolve(tmpFileName);
+			Path localTmpFile = config.getCacheDir().resolve(tmpFileName);
+			CloudPath cloudTmpFile = config.getUploadDir().resolve(tmpFileName);
 			try {
 				openFile.persistTo(localTmpFile)
 						.thenCompose((ignored) -> {
@@ -177,12 +163,12 @@ class OpenFileUploader {
 					throw new NoSuchFileException("Unable to find persisted file " + localTmpFile.toString());
 				}
 				final var realCloudPath = openFile.getPath();
-				var targetDir = lostAndFoundDir.resolve(realCloudPath.subpath(0, realCloudPath.getNameCount() - 1).toString());
+				var targetDir = config.getLostAndFoundDir().resolve(realCloudPath.subpath(0, realCloudPath.getNameCount() - 1).toString());
 				Files.createDirectories(targetDir);
 				Files.move(localTmpFile, targetDir.resolve(realCloudPath.getFileName().toString()), StandardCopyOption.REPLACE_EXISTING);
-				LOG.info("Backup of {} to {} successful.", realCloudPath, lostAndFoundDir);
+				LOG.info("Backup of {} to {} successful.", realCloudPath, config.getLostAndFoundDir());
 			} catch (IOException e2) {
-				LOG.error("Backup of " + openFile.getPath() + " to " + lostAndFoundDir + " failed. DATA LOSS IMMINENT.", e2);
+				LOG.error("Backup of " + openFile.getPath() + " to " + config.getLostAndFoundDir() + " failed. DATA LOSS IMMINENT.", e2);
 			}
 		}
 

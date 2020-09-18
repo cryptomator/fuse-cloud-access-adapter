@@ -24,9 +24,9 @@ class OpenDirFactory {
 	private final CloudPath uploadDir;
 
 	@Inject
-	public OpenDirFactory(CloudProvider provider, CloudPath uploadDir) {
+	public OpenDirFactory(CloudProvider provider, CloudAccessFSConfig config) {
 		this.provider = provider;
-		this.uploadDir = uploadDir;
+		this.uploadDir = config.getUploadDir();
 	}
 
 	/**

@@ -49,8 +49,12 @@ public class AccessPatternIntegrationTest {
 		this.lostNFound = tmpDir.resolve("lost+Found");
 		Files.createDirectory(this.mirrored);
 		Files.createDirectory(this.cacheDir);
+		System.setProperty("org.cryptomator.fusecloudaccess.cacheDir", cacheDir.toString());
+		System.setProperty("org.cryptomator.fusecloudaccess.lostAndFoundDir", lostNFound.toString());
 		this.provider = CloudAccess.toLocalFileSystem(this.mirrored);
-		this.fs = CloudAccessFS.createNewFileSystem(provider, 1000, this.cacheDir,this.lostNFound, CloudPath.of("/"));
+		this.fs = CloudAccessFS.createNewFileSystem(provider);
+
+		fs.init(null);
 	}
 
 	@Test
@@ -223,7 +227,7 @@ public class AccessPatternIntegrationTest {
 	@DisplayName("simulates \"get attributes during write\" access pattern")
 	void testGetAttributesDuringWrite() {
 		provider = CloudAccess.vaultFormat8GCMCloudAccess(CloudAccess.toLocalFileSystem(this.mirrored), CloudPath.of("/"), Base64.getDecoder().decode("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="));
-		fs = CloudAccessFS.createNewFileSystem(provider, 1000, this.cacheDir, this.lostNFound, CloudPath.of("/"));
+		fs = CloudAccessFS.createNewFileSystem(provider);
 
 		var path = "/foo.txt";
 

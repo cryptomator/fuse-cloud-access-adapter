@@ -37,7 +37,7 @@ import static java.nio.file.StandardOpenOption.*;
 class OpenFile implements Closeable {
 
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFile.class);
-	private static final int READAHEAD_SIZE = 1024 * 1024; // 1 MiB
+	private static final int READAHEAD_SIZE = 1024 * 1024; // 1 MiB TODO: should this be configurable?
 
 	private final CompletableAsynchronousFileChannel fc;
 	private final CloudProvider provider;
