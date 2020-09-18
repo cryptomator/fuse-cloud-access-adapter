@@ -16,6 +16,7 @@ import java.util.function.Predicate;
 class OpenDirFactory {
 
 	private static final Logger LOG = LoggerFactory.getLogger(OpenDirFactory.class);
+	private static final CloudPath ROOT_DIR = CloudPath.of("/");
 
 	private final ConcurrentMap<Long, OpenDir> openDirs = new ConcurrentHashMap<>();
 	private final AtomicLong fileHandleGen = new AtomicLong();
@@ -34,12 +35,10 @@ class OpenDirFactory {
 	 */
 	public long open(CloudPath path) {
 		long fileHandle = fileHandleGen.getAndIncrement();
-		Predicate<String> listingFilter;
-		if (path.equals(path.getRoot())) {
-			listingFilter = s -> !uploadDir.getFileName().toString().equals(s);
-		} else {
-			listingFilter = s -> true;
-		}
+		String uploadDirName = Optional.ofNullable(uploadDir.getFileName()).map(CloudPath::toString).orElse(null);
+		Predicate<String> listingFilter = ROOT_DIR.equals(path)
+				? childName -> !childName.equals(uploadDirName) // exclude uploadDir from child list
+				: childName -> true; // include all children
 		OpenDir dir = new OpenDir(provider, listingFilter, path);
 
 		openDirs.put(fileHandle, dir);
