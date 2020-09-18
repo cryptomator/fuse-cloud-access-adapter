@@ -53,7 +53,7 @@ class OpenFileFactory {
 		this.uploader = uploader;
 		this.cacheDir = config.getCacheDir();
 		this.scheduler = scheduler;
-		this.keepIdleFileSeconds = config.getCacheTimeoutSeconds();
+		this.keepIdleFileSeconds = config.getIdleFileTimeoutSeconds();
 	}
 
 	/**
