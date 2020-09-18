@@ -16,9 +16,6 @@ public interface CloudAccessFSComponent {
 		@BindsInstance
 		Builder cloudProvider(CloudProvider cloudProvider);
 
-		@BindsInstance
-		Builder fsConfig(CloudAccessFSConfig config);
-
 		CloudAccessFSComponent build();
 	}
 }

@@ -44,10 +44,10 @@ public class CloudAccessFSTest {
 
 	private static final Runtime RUNTIME = Runtime.getSystemRuntime();
 	private static final CloudPath PATH = CloudPath.of("some/path/to/resource");
-	private static final int TIMEOUT = 100;
 
 	private CloudAccessFS cloudFs;
 	private CloudProvider provider;
+	private CloudAccessFSConfig config;
 	private ScheduledExecutorService scheduler;
 	private OpenFileUploader uploader;
 	private OpenFileFactory fileFactory;
@@ -68,12 +68,13 @@ public class CloudAccessFSTest {
 	@BeforeEach
 	public void setup() {
 		provider = Mockito.mock(CloudProvider.class);
+		config = Mockito.mock(CloudAccessFSConfig.class);
 		scheduler = Mockito.mock(ScheduledExecutorService.class);
 		uploader = Mockito.mock(OpenFileUploader.class);
 		fileFactory = Mockito.mock(OpenFileFactory.class);
 		dirFactory = Mockito.mock(OpenDirFactory.class);
 		lockManager = Mockito.mock(LockManager.class);
-		cloudFs = new CloudAccessFS(provider, CloudAccessFSTest.TIMEOUT, scheduler, uploader, fileFactory, dirFactory, lockManager, Mockito.mock(CloudPath.class));
+		cloudFs = new CloudAccessFS(provider, config, scheduler, uploader, fileFactory, dirFactory, lockManager);
 
 		pathLockBuilder = Mockito.mock(PathLockBuilder.class);
 		pathLock = Mockito.mock(PathLock.class);
@@ -85,38 +86,48 @@ public class CloudAccessFSTest {
 		Mockito.when(pathLock.lockDataForWriting()).thenReturn(dataLock);
 	}
 
-	@DisplayName("test returnOrTimeout() returns expected result on regular execution")
-	@Test
-	public void testRegular() {
-		int expectedResult = 1337;
-		var future = CompletableFuture.completedFuture(expectedResult);
-		Assertions.assertEquals(expectedResult, cloudFs.returnOrTimeout(future));
-	}
+	@Nested
+	class ReturnOrTimeout {
 
-	@DisplayName("test returnOrTimeout() returns EINTR on interrupt")
-	@Test
-	public void testInterrupt() throws InterruptedException {
-		AtomicInteger actualResult = new AtomicInteger();
-		Thread t = new Thread(() -> {
-			actualResult.set(cloudFs.returnOrTimeout(new CompletableFuture<>()));
-		});
-		t.start();
-		t.interrupt();
-		t.join();
-		Assertions.assertEquals(-ErrorCodes.EINTR(), actualResult.get());
-	}
+		@BeforeEach
+		public void setup() {
+			Mockito.when(config.getProviderResponseTimeoutSeconds()).thenReturn(1);
+		}
 
-	@DisplayName("test returnOrTimeout() returns EIO on ExecutionException")
-	@Test
-	public void testExecution() {
-		CompletableFuture future = CompletableFuture.failedFuture(new CloudProviderException());
-		Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.returnOrTimeout(future));
-	}
+		@DisplayName("test returnOrTimeout() returns expected result on regular execution")
+		@Test
+		public void testReturnOrTimeoutSucceeds() {
+			int expectedResult = 1337;
+			var future = CompletableFuture.completedFuture(expectedResult);
+			Assertions.assertEquals(expectedResult, cloudFs.returnOrTimeout(future));
+		}
 
-	@DisplayName("test returnOrTimeout() return ETIMEDOUT on timeout")
-	@Test
-	public void testTimeout() {
-		Assertions.assertEquals(-ErrorCodes.ETIMEDOUT(), cloudFs.returnOrTimeout(new CompletableFuture<>()));
+		@DisplayName("test returnOrTimeout() returns EINTR on interrupt")
+		@Test
+		public void testReturnOrTimeoutInterrupted() throws InterruptedException {
+			AtomicInteger actualResult = new AtomicInteger();
+			Thread t = new Thread(() -> {
+				actualResult.set(cloudFs.returnOrTimeout(new CompletableFuture<>()));
+			});
+			t.start();
+			t.interrupt();
+			t.join();
+			Assertions.assertEquals(-ErrorCodes.EINTR(), actualResult.get());
+		}
+
+		@DisplayName("test returnOrTimeout() returns EIO on ExecutionException")
+		@Test
+		public void testReturnOrTimeoutExecutionException() {
+			CompletableFuture future = CompletableFuture.failedFuture(new CloudProviderException());
+			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.returnOrTimeout(future));
+		}
+
+		@DisplayName("test returnOrTimeout() return ETIMEDOUT on timeout")
+		@Test
+		public void testReturnOrTimeoutTimeouts() {
+			Assertions.assertEquals(-ErrorCodes.ETIMEDOUT(), cloudFs.returnOrTimeout(new CompletableFuture<>()));
+		}
+
 	}
 
 	@Nested

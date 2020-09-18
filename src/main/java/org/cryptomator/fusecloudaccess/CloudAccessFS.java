@@ -63,10 +63,9 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		this.lockManager = lockManager;
 	}
 
-	public static CloudAccessFS createNewFileSystem(CloudProvider provider, CloudAccessFSConfig config) {
+	public static CloudAccessFS createNewFileSystem(CloudProvider provider) {
 		return DaggerCloudAccessFSComponent.builder() //
 				.cloudProvider(provider) //
-				.fsConfig(config)
 				.build() //
 				.filesystem();
 	}
@@ -81,7 +80,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	 */
 	int returnOrTimeout(CompletionStage<Integer> returnCode) {
 		try {
-			return returnCode.toCompletableFuture().get(config.getProviderResponseTimeoutMillis(), TimeUnit.MILLISECONDS);
+			return returnCode.toCompletableFuture().get(config.getProviderResponseTimeoutSeconds(), TimeUnit.SECONDS);
 		} catch (InterruptedException e) {
 			LOG.warn("async call interrupted");
 			Thread.currentThread().interrupt();
@@ -103,7 +102,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	private CompletionStage<Integer> initInternal() {
 		return provider.createFolderIfNonExisting(config.getUploadDir()).exceptionally(e -> {
-			LOG.error("init() failed: Unable to create/use tmp upload directory. Local changes won't be uploaded and always moved to " + config.getLostNFoundDir() + ".", e);
+			LOG.error("init() failed: Unable to create/use tmp upload directory. Local changes won't be uploaded and always moved to " + config.getLostAndFoundDir() + ".", e);
 			return null;
 		}).thenApply(ignored -> 0);
 	}
