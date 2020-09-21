@@ -7,8 +7,10 @@ import org.cryptomator.cloudaccess.api.CloudItemType;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
+import org.cryptomator.cloudaccess.api.Quota;
 import org.cryptomator.cloudaccess.api.exceptions.AlreadyExistsException;
 import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
+import org.cryptomator.cloudaccess.api.exceptions.QuotaNotAvailableException;
 import org.cryptomator.cloudaccess.api.exceptions.TypeMismatchException;
 import org.cryptomator.fusecloudaccess.locks.DataLock;
 import org.cryptomator.fusecloudaccess.locks.LockManager;
@@ -132,8 +134,23 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public int statfs(String path, Statvfs stbuf) {
-		long total = 1_000_000_000; // 1 GB TODO: get info from cloud or config
-		long avail = 500_000_000; // 500 MB TODO: get info from cloud or config
+		long total = config.getTotalQuota();
+		long avail = config.getAvailableQuota();
+
+		try {
+			var quota = provider.quota(CloudPath.of("/")).toCompletableFuture().join();
+			avail = quota.getAvailableBytes();
+			if(quota.getTotalBytes().isPresent()) {
+				total = quota.getTotalBytes().get();
+			} else if(quota.getUsedBytes().isPresent()) {
+				total = quota.getAvailableBytes() + quota.getUsedBytes().get();
+			} else {
+				LOG.info("Quota used and total is not available, falling back to default for total available");
+			}
+		} catch (QuotaNotAvailableException e) {
+			LOG.info("Quota is not available, falling back to default", e);
+		}
+
 		long tBlocks = total / BLOCKSIZE;
 		long aBlocks = avail / BLOCKSIZE;
 		stbuf.f_bsize.set(BLOCKSIZE);
