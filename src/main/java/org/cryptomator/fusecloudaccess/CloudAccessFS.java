@@ -26,6 +26,8 @@ import ru.serce.jnrfuse.struct.Statvfs;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.Files;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.EnumSet;
@@ -96,15 +98,36 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	@Override
 	public Pointer init(Pointer conn) {
-		returnOrTimeout(initInternal());
+		//check upload dir on server
+		var returnCode = returnOrTimeout(initInternal());
+		if (returnCode != 0) {
+			throw new IllegalStateException("Unable to create remote temporary upload dir.");
+		}
+		//check local cache dir
+		try {
+			Files.createDirectory(config.getCacheDir());
+		} catch (FileAlreadyExistsException e) { // dis ok
+			LOG.debug("init(): Local cache directory already exists.");
+		} catch (IOException e) {
+			LOG.error("init() failed: Unable to create local cache directory.");
+			throw new IllegalStateException("Unable to create local cache dir.");
+		}
+		//check local lost and found dir
+		if (!Files.exists(config.getLostAndFoundDir())) {
+			LOG.error("init() failed: Local lost+found directory does not exist.");
+			throw new IllegalStateException("Lost+Found dir does not exists.");
+		}
 		return null;
 	}
 
 	private CompletionStage<Integer> initInternal() {
-		return provider.createFolderIfNonExisting(config.getUploadDir()).exceptionally(e -> {
-			LOG.error("init() failed: Unable to create/use tmp upload directory. Local changes won't be uploaded and always moved to " + config.getLostAndFoundDir() + ".", e);
-			return null;
-		}).thenApply(ignored -> 0);
+		return provider.createFolderIfNonExisting(config.getUploadDir())
+				.thenApply(ignored -> 0)
+				.exceptionally(e -> {
+					//LOG.error("init() failed: Unable to create/use tmp upload directory. Local changes won't be uploaded and always moved to " + config.getLostAndFoundDir() + ".", e);
+					LOG.error("init() failed: Unable to create upload directory.");
+					return -ErrorCodes.EIO();
+				});
 	}
 
 	@Override
