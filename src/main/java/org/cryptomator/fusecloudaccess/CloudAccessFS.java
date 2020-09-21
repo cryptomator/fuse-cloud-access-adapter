@@ -7,7 +7,6 @@ import org.cryptomator.cloudaccess.api.CloudItemType;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
-import org.cryptomator.cloudaccess.api.Quota;
 import org.cryptomator.cloudaccess.api.exceptions.AlreadyExistsException;
 import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
 import org.cryptomator.cloudaccess.api.exceptions.QuotaNotAvailableException;
@@ -140,9 +139,9 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		try {
 			var quota = provider.quota(CloudPath.of("/")).toCompletableFuture().join();
 			avail = quota.getAvailableBytes();
-			if(quota.getTotalBytes().isPresent()) {
+			if (quota.getTotalBytes().isPresent()) {
 				total = quota.getTotalBytes().get();
-			} else if(quota.getUsedBytes().isPresent()) {
+			} else if (quota.getUsedBytes().isPresent()) {
 				total = quota.getAvailableBytes() + quota.getUsedBytes().get();
 			} else {
 				LOG.info("Quota used and total is not available, falling back to default for total available");
