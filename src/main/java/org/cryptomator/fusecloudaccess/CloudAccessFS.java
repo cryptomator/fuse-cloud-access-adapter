@@ -147,7 +147,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 				LOG.info("Quota used and total is not available, falling back to default for total available");
 			}
 		} catch (QuotaNotAvailableException e) {
-			LOG.info("Quota is not available, falling back to default", e);
+			LOG.debug("Quota is not available, falling back to default");
 		}
 
 		long tBlocks = total / BLOCKSIZE;
