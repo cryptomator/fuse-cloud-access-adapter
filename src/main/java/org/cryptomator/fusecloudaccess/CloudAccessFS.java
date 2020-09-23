@@ -29,6 +29,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.EnumSet;
@@ -98,36 +99,34 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	@Override
-	public Pointer init(Pointer conn) {
-		//check upload dir on server
-		var returnCode = returnOrTimeout(initInternal());
+	public void mount(Path mountPoint, boolean blocking, boolean debug, String[] fuseOpts) {
+		//upload dir on server
+		var returnCode = returnOrTimeout(
+				provider.createFolderIfNonExisting(config.getUploadDir())
+						.thenApply(ignored -> 0)
+						.exceptionally(e -> -ErrorCodes.EIO())
+		);
 		if (returnCode != 0) {
+			LOG.error("Mounting denied: Unable to create tmp upload directory.");
 			throw new IllegalStateException("Unable to create remote temporary upload dir.");
 		}
-		//check local cache dir
+
+		//local cache dir
 		try {
 			Files.createDirectory(config.getCacheDir());
 		} catch (FileAlreadyExistsException e) { // dis ok
-			LOG.debug("init(): Local cache directory already exists.");
+			LOG.debug("Local cache directory already exists.");
 		} catch (IOException e) {
-			LOG.error("init() failed: Unable to create local cache directory.");
+			LOG.error("Mounting denied: Unable to create local cache directory.");
 			throw new IllegalStateException("Unable to create local cache dir.");
 		}
-		//check local lost and found dir
+
+		//local lost and found dir
 		if (!Files.exists(config.getLostAndFoundDir())) {
-			LOG.error("init() failed: Local lost+found directory does not exist.");
+			LOG.error("Mounting denied: Local lost+found directory does not exist.");
 			throw new IllegalStateException("Lost+Found dir does not exists.");
 		}
-		return null;
-	}
-
-	private CompletionStage<Integer> initInternal() {
-		return provider.createFolderIfNonExisting(config.getUploadDir())
-				.thenApply(ignored -> 0)
-				.exceptionally(e -> {
-					LOG.error("init() failed: Unable to create/use tmp upload directory. Local changes won't be uploaded and always moved to " + config.getLostAndFoundDir() + ".", e);
-					return -ErrorCodes.EIO();
-				});
+		super.mount(mountPoint, blocking, debug, fuseOpts);
 	}
 
 	@Override
