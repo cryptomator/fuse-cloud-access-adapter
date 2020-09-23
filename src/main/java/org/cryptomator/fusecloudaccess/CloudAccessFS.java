@@ -125,8 +125,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		return provider.createFolderIfNonExisting(config.getUploadDir())
 				.thenApply(ignored -> 0)
 				.exceptionally(e -> {
-					//LOG.error("init() failed: Unable to create/use tmp upload directory. Local changes won't be uploaded and always moved to " + config.getLostAndFoundDir() + ".", e);
-					LOG.error("init() failed: Unable to create upload directory.");
+					LOG.error("init() failed: Unable to create/use tmp upload directory. Local changes won't be uploaded and always moved to " + config.getLostAndFoundDir() + ".", e);
 					return -ErrorCodes.EIO();
 				});
 	}

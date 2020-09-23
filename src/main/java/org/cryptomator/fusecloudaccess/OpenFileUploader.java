@@ -136,7 +136,7 @@ class OpenFileUploader {
 						.toCompletableFuture().get();
 				// since this is async code, we need a new path lock for this move:
 				try (var lock = lockManager.createPathLock(openFile.getPath().toString()).forWriting()) {
-					LOG.debug("Finishing upload of {} to {}", openFile, openFile.getPath());
+					LOG.debug("Finishing upload of {} by moving from temporary file {} to real location.", openFile.getPath(), cloudTmpFile);
 					provider.move(cloudTmpFile, openFile.getPath(), true).toCompletableFuture().get();
 				}
 				return null;
