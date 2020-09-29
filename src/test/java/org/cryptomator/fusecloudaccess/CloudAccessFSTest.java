@@ -44,10 +44,10 @@ public class CloudAccessFSTest {
 
 	private static final Runtime RUNTIME = Runtime.getSystemRuntime();
 	private static final CloudPath PATH = CloudPath.of("some/path/to/resource");
-	private static final int TIMEOUT = 100;
 
 	private CloudAccessFS cloudFs;
 	private CloudProvider provider;
+	private CloudAccessFSConfig config;
 	private ScheduledExecutorService scheduler;
 	private OpenFileUploader uploader;
 	private OpenFileFactory fileFactory;
@@ -68,12 +68,13 @@ public class CloudAccessFSTest {
 	@BeforeEach
 	public void setup() {
 		provider = Mockito.mock(CloudProvider.class);
+		config = Mockito.mock(CloudAccessFSConfig.class);
 		scheduler = Mockito.mock(ScheduledExecutorService.class);
 		uploader = Mockito.mock(OpenFileUploader.class);
 		fileFactory = Mockito.mock(OpenFileFactory.class);
 		dirFactory = Mockito.mock(OpenDirFactory.class);
 		lockManager = Mockito.mock(LockManager.class);
-		cloudFs = new CloudAccessFS(provider, CloudAccessFSTest.TIMEOUT, scheduler, uploader, fileFactory, dirFactory, lockManager);
+		cloudFs = new CloudAccessFS(provider, config, scheduler, uploader, fileFactory, dirFactory, lockManager);
 
 		pathLockBuilder = Mockito.mock(PathLockBuilder.class);
 		pathLock = Mockito.mock(PathLock.class);
@@ -85,38 +86,48 @@ public class CloudAccessFSTest {
 		Mockito.when(pathLock.lockDataForWriting()).thenReturn(dataLock);
 	}
 
-	@DisplayName("test returnOrTimeout() returns expected result on regular execution")
-	@Test
-	public void testRegular() {
-		int expectedResult = 1337;
-		var future = CompletableFuture.completedFuture(expectedResult);
-		Assertions.assertEquals(expectedResult, cloudFs.returnOrTimeout(future));
-	}
+	@Nested
+	class ReturnOrTimeout {
 
-	@DisplayName("test returnOrTimeout() returns EINTR on interrupt")
-	@Test
-	public void testInterrupt() throws InterruptedException {
-		AtomicInteger actualResult = new AtomicInteger();
-		Thread t = new Thread(() -> {
-			actualResult.set(cloudFs.returnOrTimeout(new CompletableFuture<>()));
-		});
-		t.start();
-		t.interrupt();
-		t.join();
-		Assertions.assertEquals(-ErrorCodes.EINTR(), actualResult.get());
-	}
+		@BeforeEach
+		public void setup() {
+			Mockito.when(config.getProviderResponseTimeoutSeconds()).thenReturn(1);
+		}
 
-	@DisplayName("test returnOrTimeout() returns EIO on ExecutionException")
-	@Test
-	public void testExecution() {
-		CompletableFuture future = CompletableFuture.failedFuture(new CloudProviderException());
-		Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.returnOrTimeout(future));
-	}
+		@DisplayName("test returnOrTimeout() returns expected result on regular execution")
+		@Test
+		public void testReturnOrTimeoutSucceeds() {
+			int expectedResult = 1337;
+			var future = CompletableFuture.completedFuture(expectedResult);
+			Assertions.assertEquals(expectedResult, cloudFs.returnOrTimeout(future));
+		}
 
-	@DisplayName("test returnOrTimeout() return ETIMEDOUT on timeout")
-	@Test
-	public void testTimeout() {
-		Assertions.assertEquals(-ErrorCodes.ETIMEDOUT(), cloudFs.returnOrTimeout(new CompletableFuture<>()));
+		@DisplayName("test returnOrTimeout() returns EINTR on interrupt")
+		@Test
+		public void testReturnOrTimeoutInterrupted() throws InterruptedException {
+			AtomicInteger actualResult = new AtomicInteger();
+			Thread t = new Thread(() -> {
+				actualResult.set(cloudFs.returnOrTimeout(new CompletableFuture<>()));
+			});
+			t.start();
+			t.interrupt();
+			t.join();
+			Assertions.assertEquals(-ErrorCodes.EINTR(), actualResult.get());
+		}
+
+		@DisplayName("test returnOrTimeout() returns EIO on ExecutionException")
+		@Test
+		public void testReturnOrTimeoutExecutionException() {
+			CompletableFuture future = CompletableFuture.failedFuture(new CloudProviderException());
+			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.returnOrTimeout(future));
+		}
+
+		@DisplayName("test returnOrTimeout() return ETIMEDOUT on timeout")
+		@Test
+		public void testReturnOrTimeoutTimeouts() {
+			Assertions.assertEquals(-ErrorCodes.ETIMEDOUT(), cloudFs.returnOrTimeout(new CompletableFuture<>()));
+		}
+
 	}
 
 	@Nested
@@ -517,7 +528,7 @@ public class CloudAccessFSTest {
 
 		@DisplayName("write() returns 0 on success")
 		@Test
-		public void testSuccessfulReadReturnsZero() throws IOException {
+		public void testOnSuccessReturnsZero() throws IOException {
 			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(openFile));
 			Mockito.when(openFile.write(buf, 1l, 2l)).thenReturn(CompletableFuture.completedFuture(0));
 
@@ -528,7 +539,7 @@ public class CloudAccessFSTest {
 
 		@ParameterizedTest(name = "write() returns EIO on any other exception (expected or not)")
 		@ValueSource(classes = {CloudProviderException.class, RuntimeException.class})
-		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws ReflectiveOperationException, IOException {
+		public void testOnAnyOtherExceptionReturnEIO(Class<Exception> exceptionClass) throws ReflectiveOperationException, IOException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
 			Mockito.when(fileFactory.get(Mockito.anyLong())).thenReturn(Optional.of(openFile));
 			Mockito.when(openFile.write(buf, 1l, 2l)).thenReturn(CompletableFuture.failedFuture(e));
@@ -777,6 +788,8 @@ public class CloudAccessFSTest {
 			Mockito.verify(pathLock).lockDataForWriting();
 			Mockito.verify(pathLock).close();
 			Mockito.verify(dataLock).close();
+
+			Mockito.verify(fileFactory).delete(PATH);
 		}
 
 		@DisplayName("unlink(...) returns 0 on success")
@@ -799,73 +812,6 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualResult);
 		}
 
-
-		@ParameterizedTest(name = "unlink(...) returns EIO on any other exception (expected or not)")
-		@ValueSource(classes = {CloudProviderException.class, Exception.class})
-		public void testReadReturnsEIOOnAnyException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
-			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(e));
-
-			var actualResult = cloudFs.unlink(PATH.toString());
-
-			Assertions.assertEquals(-ErrorCodes.EIO(), actualResult);
-		}
-
-	}
-
-	@Nested
-	class DeleteTest {
-
-		@AfterEach
-		public void tearDown() {
-			Mockito.verify(lockManager).createPathLock(PATH.toString());
-			Mockito.verify(pathLockBuilder).forWriting();
-			Mockito.verify(pathLock).lockDataForWriting();
-			Mockito.verify(pathLock).close();
-			Mockito.verify(dataLock).close();
-		}
-
-		@DisplayName("unlink(...) returns 0 on success")
-		@Test
-		public void testUnlinkReturnsZeroOnSuccess() {
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.completedFuture(null));
-
-			var actualResult = cloudFs.unlink(PATH.toString());
-
-			Assertions.assertEquals(0, actualResult);
-		}
-
-		@DisplayName("rmdir(...) returns 0 on success")
-		@Test
-		public void testRmdirReturnsZeroOnSuccess() {
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.completedFuture(null));
-
-			var actualResult = cloudFs.rmdir(PATH.toString());
-
-			Assertions.assertEquals(0, actualResult);
-		}
-
-		@DisplayName("unlink(...) returns ENOENT if path not found")
-		@Test
-		public void testUnlinkReturnsENOENTOnNotFoundException() {
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
-
-			var actualResult = cloudFs.unlink(PATH.toString());
-
-			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualResult);
-		}
-
-		@DisplayName("rmdir(...) returns ENOENT if path not found")
-		@Test
-		public void testRmdirReturnsENOENTOnNotFoundException() {
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
-
-			var actualResult = cloudFs.rmdir(PATH.toString());
-
-			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualResult);
-		}
-
-
 		@DisplayName("unlink(...) returns EIO on any other exception (expected or not)")
 		@ParameterizedTest(name = "unlink(...) returns EIO on {0}")
 		@ValueSource(classes = {CloudProviderException.class, Exception.class})
@@ -878,10 +824,46 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.EIO(), actualResult);
 		}
 
-		@DisplayName("rmdir(...) returns EIO on any other exception (expected or not)")
+	}
+
+	@Nested
+	class RmdirTest {
+
+		@AfterEach
+		public void tearDown() {
+			Mockito.verify(lockManager).createPathLock(PATH.toString());
+			Mockito.verify(pathLockBuilder).forWriting();
+			Mockito.verify(pathLock).lockDataForWriting();
+			Mockito.verify(pathLock).close();
+			Mockito.verify(dataLock).close();
+
+			Mockito.verify(fileFactory).deleteDescendants(PATH);
+		}
+
+		@Test
+		@DisplayName("rmdir() returns 0 on success")
+		public void testOnSuccessReturnsZero() {
+			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.completedFuture(null));
+
+			var actualResult = cloudFs.rmdir(PATH.toString());
+
+			Assertions.assertEquals(0, actualResult);
+		}
+
+		@Test
+		@DisplayName("rmdir() returns ENOENT if not found")
+		public void testNotFoundReturnsENOENT() {
+			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
+
+			var actualResult = cloudFs.rmdir(PATH.toString());
+
+			Assertions.assertEquals(-ErrorCodes.ENOENT(), actualResult);
+		}
+
+		@DisplayName("rmdir() returns EIO on any other exception")
 		@ParameterizedTest(name = "rmdir(...) returns EIO on {0}")
 		@ValueSource(classes = {CloudProviderException.class, Exception.class})
-		public void testRmdirReturnsEIOOnException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
+		public void testOtherErrorsReturnEIO(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
 			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(e));
 

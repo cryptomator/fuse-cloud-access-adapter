@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.function.Predicate;
 
 class OpenDir {
 
@@ -20,21 +21,24 @@ class OpenDir {
 	private final CloudPath path;
 	private Optional<String> pageToken;
 	private List<String> children;
+	private Predicate<? super String> listingFilter;
 	private boolean reachedEof;
 
-	public OpenDir(CloudProvider provider, CloudPath path) {
+	public OpenDir(CloudProvider provider, Predicate<String> listingFilter, CloudPath path) {
 		this.provider = provider;
 		this.path = path;
 		this.pageToken = Optional.empty();
 		this.children = new ArrayList<>();
 		this.children.add(".");
 		this.children.add("..");
+		this.listingFilter = listingFilter;
 	}
+
 
 	private CompletionStage<Void> loadNext() {
 		Preconditions.checkState(!reachedEof);
 		return provider.list(path, pageToken).thenAccept(itemList -> {
-			itemList.getItems().stream().map(CloudItemMetadata::getName).forEachOrdered(children::add);
+			itemList.getItems().stream().map(CloudItemMetadata::getName).filter(listingFilter).forEachOrdered(children::add);
 			pageToken = itemList.getNextPageToken();
 			reachedEof = itemList.getNextPageToken().isEmpty();
 		});

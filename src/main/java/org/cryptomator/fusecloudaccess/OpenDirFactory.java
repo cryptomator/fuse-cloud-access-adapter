@@ -10,19 +10,23 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Predicate;
 
 @FileSystemScoped
 class OpenDirFactory {
 
 	private static final Logger LOG = LoggerFactory.getLogger(OpenDirFactory.class);
+	private static final CloudPath ROOT_DIR = CloudPath.of("/");
 
 	private final ConcurrentMap<Long, OpenDir> openDirs = new ConcurrentHashMap<>();
 	private final AtomicLong fileHandleGen = new AtomicLong();
 	private final CloudProvider provider;
+	private final CloudPath uploadDir;
 
 	@Inject
-	public OpenDirFactory(CloudProvider provider) {
+	public OpenDirFactory(CloudProvider provider, CloudAccessFSConfig config) {
 		this.provider = provider;
+		this.uploadDir = config.getUploadDir();
 	}
 
 	/**
@@ -31,7 +35,12 @@ class OpenDirFactory {
 	 */
 	public long open(CloudPath path) {
 		long fileHandle = fileHandleGen.getAndIncrement();
-		OpenDir dir = new OpenDir(provider, path);
+		String uploadDirName = Optional.ofNullable(uploadDir.getFileName()).map(CloudPath::toString).orElse(null);
+		Predicate<String> listingFilter = ROOT_DIR.equals(path)
+				? childName -> !childName.equals(uploadDirName) // exclude uploadDir from child list
+				: childName -> true; // include all children
+		OpenDir dir = new OpenDir(provider, listingFilter, path);
+
 		openDirs.put(fileHandle, dir);
 		LOG.trace("Opening dir {} {}", fileHandle, dir);
 		return fileHandle;

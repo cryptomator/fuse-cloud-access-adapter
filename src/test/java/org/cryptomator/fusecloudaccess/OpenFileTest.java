@@ -53,7 +53,7 @@ public class OpenFileTest {
 	@ValueSource(longs = {0l, 1l, 42l})
 	public void testCreate(long size, @TempDir Path tmpDir) throws IOException {
 		Path tmpFile = tmpDir.resolve("cache.file");
-		try (var cachedFile = OpenFile.create(file, tmpFile, provider, size, Instant.EPOCH)) {
+		try (var cachedFile = OpenFile.create(file, tmpFile, provider, size)) {
 			Assertions.assertNotNull(cachedFile);
 			Assertions.assertEquals(size, cachedFile.getSize());
 		}
@@ -66,7 +66,7 @@ public class OpenFileTest {
 		Path tmpFile = tmpDir.resolve("cache.file");
 		Path persistentFile = tmpDir.resolve("persistent.file");
 
-		try (var cachedFile = OpenFile.create(file, tmpFile, provider, 0, Instant.EPOCH)) {
+		try (var cachedFile = OpenFile.create(file, tmpFile, provider, 0)) {
 			cachedFile.truncate(100l);
 			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> cachedFile.persistTo(persistentFile).toCompletableFuture().get());
 		}

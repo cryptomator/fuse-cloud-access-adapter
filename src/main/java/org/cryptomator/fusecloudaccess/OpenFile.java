@@ -24,6 +24,7 @@ import java.nio.channels.WritableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Iterator;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -36,7 +37,7 @@ import static java.nio.file.StandardOpenOption.*;
 class OpenFile implements Closeable {
 
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFile.class);
-	private static final int READAHEAD_SIZE = 1024 * 1024; // 1 MiB
+	private static final int READAHEAD_SIZE = 1024 * 1024; // 1 MiB TODO: should this be configurable?
 
 	private final CompletableAsynchronousFileChannel fc;
 	private final CloudProvider provider;
@@ -66,11 +67,10 @@ class OpenFile implements Closeable {
 	 * @param tmpFilePath         Where to store the volatile cache
 	 * @param provider            The cloud provider used to load and persist file contents
 	 * @param initialSize         Must be 0 for newly created files. (Use {@link #truncate(long)} if you want to grow it)
-	 * @param initialLastModified The initial modification date to report until further writes happen
 	 * @return The created file
 	 * @throws IOException I/O errors during creation of the cache file located at <code>tmpFilePath</code>
 	 */
-	public static OpenFile create(CloudPath path, Path tmpFilePath, CloudProvider provider, long initialSize, Instant initialLastModified) throws IOException {
+	public static OpenFile create(CloudPath path, Path tmpFilePath, CloudProvider provider, long initialSize) throws IOException {
 		var fc = AsynchronousFileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE, DELETE_ON_CLOSE);
 		if (initialSize > 0) {
 			try {
@@ -82,7 +82,7 @@ class OpenFile implements Closeable {
 				throw new IOException("Failed to create file", e);
 			}
 		}
-		return new OpenFile(path, new CompletableAsynchronousFileChannel(fc), provider, TreeRangeSet.create(), initialLastModified);
+		return new OpenFile(path, new CompletableAsynchronousFileChannel(fc), provider, TreeRangeSet.create(), Instant.now());
 	}
 
 	public AtomicInteger getOpenFileHandleCount() {
@@ -191,7 +191,7 @@ class OpenFile implements Closeable {
 	public CompletableFuture<Integer> write(Pointer buf, long offset, long count) {
 		Preconditions.checkState(fc.isOpen());
 		markDirty();
-		setLastModified(Instant.now());
+		setLastModified(Instant.now().truncatedTo(ChronoUnit.SECONDS));
 		markPopulatedIfGrowing(offset);
 		return fc.writeFromPointer(buf, offset, count).thenApply(written -> {
 			synchronized (populatedRanges) {
@@ -306,13 +306,13 @@ class OpenFile implements Closeable {
 		if (size < fc.size()) {
 			fc.truncate(size);
 			markDirty();
-			setLastModified(Instant.now());
+			setLastModified(Instant.now().truncatedTo(ChronoUnit.SECONDS));
 		} else if (size > fc.size()) {
 			assert size > 0;
 			markPopulatedIfGrowing(size);
 			fc.write(ByteBuffer.allocateDirect(1), size - 1);
 			markDirty();
-			setLastModified(Instant.now());
+			setLastModified(Instant.now().truncatedTo(ChronoUnit.SECONDS));
 		} else {
 			assert size == fc.size();
 			// no-op

@@ -9,6 +9,7 @@ import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
 import org.cryptomator.cloudaccess.api.exceptions.AlreadyExistsException;
 import org.cryptomator.cloudaccess.api.exceptions.NotFoundException;
+import org.cryptomator.cloudaccess.api.exceptions.QuotaNotAvailableException;
 import org.cryptomator.cloudaccess.api.exceptions.TypeMismatchException;
 import org.cryptomator.fusecloudaccess.locks.DataLock;
 import org.cryptomator.fusecloudaccess.locks.LockManager;
@@ -26,8 +27,11 @@ import ru.serce.jnrfuse.struct.Statvfs;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.EnumSet;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -45,7 +49,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	private static final int BLOCKSIZE = 4096;
 
 	private final CloudProvider provider;
-	private final int timeoutMillis;
+	private final CloudAccessFSConfig config;
 	private final ScheduledExecutorService scheduler;
 	private final OpenFileUploader openFileUploader;
 	private final OpenFileFactory openFileFactory;
@@ -53,9 +57,9 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	private final LockManager lockManager;
 
 	@Inject
-	CloudAccessFS(CloudProvider provider, int timeoutMillis, ScheduledExecutorService scheduler, OpenFileUploader openFileUploader, OpenFileFactory openFileFactory, OpenDirFactory openDirFactory, LockManager lockManager) {
+	CloudAccessFS(CloudProvider provider, CloudAccessFSConfig config, ScheduledExecutorService scheduler, OpenFileUploader openFileUploader, OpenFileFactory openFileFactory, OpenDirFactory openDirFactory, LockManager lockManager) {
 		this.provider = provider;
-		this.timeoutMillis = timeoutMillis;
+		this.config = config;
 		this.scheduler = scheduler;
 		this.openFileUploader = openFileUploader;
 		this.openFileFactory = openFileFactory;
@@ -63,12 +67,9 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		this.lockManager = lockManager;
 	}
 
-	public static CloudAccessFS createNewFileSystem(CloudProvider provider, int timeoutMillis, Path cacheDir, CloudPath uploadDir) {
+	public static CloudAccessFS createNewFileSystem(CloudProvider provider) {
 		return DaggerCloudAccessFSComponent.builder() //
 				.cloudProvider(provider) //
-				.timeoutInMillis(timeoutMillis) //
-				.cacheDir(cacheDir) //
-				.uploadDir(uploadDir) //
 				.build() //
 				.filesystem();
 	}
@@ -83,7 +84,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	 */
 	int returnOrTimeout(CompletionStage<Integer> returnCode) {
 		try {
-			return returnCode.toCompletableFuture().get(timeoutMillis, TimeUnit.MILLISECONDS);
+			return returnCode.toCompletableFuture().get(config.getProviderResponseTimeoutSeconds(), TimeUnit.SECONDS);
 		} catch (InterruptedException e) {
 			LOG.warn("async call interrupted");
 			Thread.currentThread().interrupt();
@@ -98,9 +99,55 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	@Override
+	public void mount(Path mountPoint, boolean blocking, boolean debug, String[] fuseOpts) {
+		//upload dir on server
+		var returnCode = returnOrTimeout(
+				provider.createFolderIfNonExisting(config.getUploadDir())
+						.thenApply(ignored -> 0)
+						.exceptionally(e -> -ErrorCodes.EIO())
+		);
+		if (returnCode != 0) {
+			LOG.error("Mounting denied: Unable to create tmp upload directory.");
+			throw new IllegalStateException("Unable to create remote temporary upload dir.");
+		}
+
+		//local cache dir
+		try {
+			Files.createDirectory(config.getCacheDir());
+		} catch (FileAlreadyExistsException e) { // dis ok
+			LOG.debug("Local cache directory already exists.");
+		} catch (IOException e) {
+			LOG.error("Mounting denied: Unable to create local cache directory.");
+			throw new IllegalStateException("Unable to create local cache dir.");
+		}
+
+		//local lost and found dir
+		if (!Files.exists(config.getLostAndFoundDir())) {
+			LOG.error("Mounting denied: Local lost+found directory does not exist.");
+			throw new IllegalStateException("Lost+Found dir does not exists.");
+		}
+		super.mount(mountPoint, blocking, debug, fuseOpts);
+	}
+
+	@Override
 	public int statfs(String path, Statvfs stbuf) {
-		long total = 1_000_000_000; // 1 GB TODO: get info from cloud or config
-		long avail = 500_000_000; // 500 MB TODO: get info from cloud or config
+		long total = config.getTotalQuota();
+		long avail = config.getAvailableQuota();
+
+		try {
+			var quota = provider.quota(CloudPath.of("/")).toCompletableFuture().join();
+			avail = quota.getAvailableBytes();
+			if (quota.getTotalBytes().isPresent()) {
+				total = quota.getTotalBytes().get();
+			} else if (quota.getUsedBytes().isPresent()) {
+				total = quota.getAvailableBytes() + quota.getUsedBytes().get();
+			} else {
+				LOG.info("Quota used and total is not available, falling back to default for total available");
+			}
+		} catch (QuotaNotAvailableException e) {
+			LOG.debug("Quota is not available, falling back to default");
+		}
+
 		long tBlocks = total / BLOCKSIZE;
 		long aBlocks = avail / BLOCKSIZE;
 		stbuf.f_bsize.set(BLOCKSIZE);
@@ -371,8 +418,8 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	private CompletionStage<Integer> createInternal(CloudPath path, long mode, FuseFileInfo fi) {
-		var modifiedDate = Instant.now();
-		return provider.write(path, false, InputStream.nullInputStream(), 0l, Optional.of(Instant.now()), ProgressListener.NO_PROGRESS_AWARE) //
+		var modifiedDate = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+		return provider.write(path, false, InputStream.nullInputStream(), 0l, Optional.of(modifiedDate), ProgressListener.NO_PROGRESS_AWARE) //
 				.handle((nullReturn, exception) -> {
 					if (exception == null) {
 						return createInternalNonExisting(path, mode, fi, modifiedDate);
@@ -421,9 +468,9 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 				});
 	}
 
+	//This must be implemented, otherwise certain applications (e.g. TextEdit.app) fail to save text files.
 	@Override
 	public int chmod(String path, long mode) {
-		// TODO: This must be implemented! Otherwise TextEdit.app fails to save text files.
 		LOG.trace("chmod {} (mode: {})", path, mode);
 		return 0;
 	}
@@ -432,7 +479,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	public int rmdir(String path) {
 		try (PathLock pathLock = lockManager.createPathLock(path.toString()).forWriting(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
-			var rmdirCode = deleteInternal(CloudPath.of(path));
+			var rmdirCode = rmdirInternal(CloudPath.of(path));
 			var returnCode = returnOrTimeout(rmdirCode);
 			LOG.trace("rmdir {} [{}]", path, returnCode);
 			return returnCode;
@@ -442,11 +489,25 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		}
 	}
 
+	CompletionStage<Integer> rmdirInternal(CloudPath path) {
+		openFileFactory.deleteDescendants(path);
+		return provider.delete(path) //
+				.thenApply(ignored -> 0) //
+				.exceptionally(e -> {
+					if (e instanceof NotFoundException) {
+						return -ErrorCodes.ENOENT();
+					} else {
+						LOG.error("delete() failed", e);
+						return -ErrorCodes.EIO();
+					}
+				});
+	}
+
 	@Override
 	public int unlink(String path) {
 		try (PathLock pathLock = lockManager.createPathLock(path.toString()).forWriting(); //
 			 DataLock dataLock = pathLock.lockDataForWriting()) {
-			var unlinkCode = deleteInternal(CloudPath.of(path));
+			var unlinkCode = unlinkInternal(CloudPath.of(path));
 			var returnCode = returnOrTimeout(unlinkCode);
 			LOG.trace("unlink {} [{}]", path, returnCode);
 			return returnCode;
@@ -457,7 +518,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	}
 
 	// visible for testing
-	CompletionStage<Integer> deleteInternal(CloudPath path) {
+	CompletionStage<Integer> unlinkInternal(CloudPath path) {
 		openFileFactory.delete(path);
 		return provider.delete(path) //
 				.thenApply(ignored -> 0) //
@@ -536,14 +597,14 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 			truncateInternal(CloudPath.of(path), size);
 			LOG.trace("truncate {} (size: {}) [0]", path, size);
 			return 0;
-		} catch (IOException e) {
+		} catch (Exception e) {
 			LOG.error("truncate() failed", e);
 			return -ErrorCodes.EIO();
 		}
 	}
 
 	private void truncateInternal(CloudPath path, long size) throws IOException {
-		var fileHandle = openFileFactory.open(path, EnumSet.of(OpenFlags.O_WRONLY), size, Instant.now());
+		var fileHandle = openFileFactory.open(path, EnumSet.of(OpenFlags.O_WRONLY), size, Instant.now().truncatedTo(ChronoUnit.SECONDS));
 		openFileFactory.get(fileHandle).get().truncate(size);
 		openFileFactory.close(fileHandle);
 	}
@@ -576,7 +637,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 		try {
 			while (true) {
 				try {
-					openFileUploader.awaitPendingUploads(30, TimeUnit.SECONDS); // TODO make configurable
+					openFileUploader.awaitPendingUploads(config.getPendingUploadTimeoutSeconds(), TimeUnit.SECONDS);
 					break;
 				} catch (TimeoutException e) {
 					LOG.debug("Still uploading...");

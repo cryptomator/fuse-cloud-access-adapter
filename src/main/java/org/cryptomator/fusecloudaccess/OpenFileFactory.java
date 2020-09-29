@@ -31,7 +31,6 @@ class OpenFileFactory {
 
 	private static final AtomicLong FILE_HANDLE_GEN = new AtomicLong();
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFileFactory.class);
-	private static final int KEEP_IDLE_FILE_SECONDS = 10; // TODO make configurable
 
 	/*
 	 * activeFiles.compute is the primary barrier for synchronized access when creating/closing/moving OpenFiles
@@ -44,15 +43,17 @@ class OpenFileFactory {
 	private final OpenFileUploader uploader;
 	private final Path cacheDir;
 	private final ScheduledExecutorService scheduler;
+	private final int keepIdleFileSeconds;
 
 	@Inject
-	OpenFileFactory(@Named("openFiles") ConcurrentMap<CloudPath, OpenFile> openFiles, CloudProvider provider, OpenFileUploader uploader, Path cacheDir, ScheduledExecutorService scheduler) {
+	OpenFileFactory(@Named("openFiles") ConcurrentMap<CloudPath, OpenFile> openFiles, CloudProvider provider, CloudAccessFSConfig config, OpenFileUploader uploader, ScheduledExecutorService scheduler) {
 		this.openFiles = openFiles;
 		this.fileHandles = new HashMap<>();
 		this.provider = provider;
 		this.uploader = uploader;
-		this.cacheDir = cacheDir;
+		this.cacheDir = config.getCacheDir();
 		this.scheduler = scheduler;
+		this.keepIdleFileSeconds = config.getIdleFileTimeoutSeconds();
 	}
 
 	/**
@@ -64,7 +65,7 @@ class OpenFileFactory {
 		try {
 			var openFile = openFiles.compute(path, (p, file) -> {
 				if (file == null) {
-					file = createOpenFile(p, initialSize, lastModified); // TODO remove redundant lastModified?
+					file = createOpenFile(p, initialSize);
 				}
 				file.getOpenFileHandleCount().incrementAndGet();
 				file.setLastModified(lastModified);
@@ -82,10 +83,10 @@ class OpenFileFactory {
 	}
 
 	//visible for testing
-	OpenFile createOpenFile(CloudPath path, long initialSize, Instant lastModified) {
+	OpenFile createOpenFile(CloudPath path, long initialSize) {
 		try {
 			var tmpFile = cacheDir.resolve(UUID.randomUUID().toString());
-			return OpenFile.create(path, tmpFile, provider, initialSize, lastModified);
+			return OpenFile.create(path, tmpFile, provider, initialSize);
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}
@@ -95,9 +96,17 @@ class OpenFileFactory {
 		return Optional.ofNullable(fileHandles.get(fileHandle));
 	}
 
+	public void move(CloudPath oldPath, CloudPath newPath) {
+		for (CloudPath path : openFiles.keySet()) {
+			if (path.startsWith(oldPath)) {
+				moveSingleFile(path, newPath.resolve(oldPath.relativize(path)));
+			}
+		}
+	}
+
 	/**
 	 * Updates existing cached data for <code>newPath</code> (if any) with contents formerly mapped to <code>oldPath</code>,
-	 * invalidates <code>oldPath</code> and cancel pending uploads for both paths (if any).
+	 * invalidates <code>oldPath</code> and cancel pending uploads for the {@code newPath}
 	 * <p>
 	 * Cached data previously mapped to <code>newPath</code> will be discarded. No-op if no data cached for either path.
 	 * <p>
@@ -105,7 +114,7 @@ class OpenFileFactory {
 	 * @param oldPath Path to a cached file before it has been moved
 	 * @param newPath New path which is used to access the cached file
 	 */
-	public void move(CloudPath oldPath, CloudPath newPath) {
+	void moveSingleFile(CloudPath oldPath, CloudPath newPath) {
 		Preconditions.checkArgument(!oldPath.equals(newPath));
 		uploader.cancelUpload(newPath);
 		var activeFile = openFiles.remove(oldPath);
@@ -133,13 +142,20 @@ class OpenFileFactory {
 	 * @param path Path to a cached file
 	 */
 	public void delete(CloudPath path) {
-		// TODO what about descendants of path?
 		uploader.cancelUpload(path);
 		openFiles.computeIfPresent(path, (p, file) -> {
 			LOG.debug("Closing deleted file {} {}", p, file);
 			file.close();
 			return null; // removes entry from map
 		});
+	}
+
+	public void deleteDescendants(CloudPath parent) {
+		for (CloudPath path : openFiles.keySet()) {
+			if (path.startsWith(parent)) {
+				delete(path);
+			}
+		}
 	}
 
 	/**
@@ -166,7 +182,7 @@ class OpenFileFactory {
 	}
 
 	private void scheduleClose(OpenFile file) {
-		scheduler.schedule(() -> closeFileIfIdle(file.getPath()), KEEP_IDLE_FILE_SECONDS, TimeUnit.SECONDS);
+		scheduler.schedule(() -> closeFileIfIdle(file.getPath()), keepIdleFileSeconds, TimeUnit.SECONDS);
 	}
 
 	private void closeFileIfIdle(CloudPath path) {
@@ -175,7 +191,7 @@ class OpenFileFactory {
 					|| activeFile.getState() != OpenFile.State.UNMODIFIED) { // file is scheduled for upload
 				return activeFile; // keep the mapping
 			} else {
-				LOG.debug("Closing idle file {}", path);
+				LOG.trace("Closing idle file {}", path);
 				activeFile.close();
 				return null; // remove mapping
 			}

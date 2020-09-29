@@ -38,6 +38,7 @@ public class AccessPatternIntegrationTest {
 
 	private Path mirrored;
 	private Path cacheDir;
+	private Path lostNFound;
 	private CloudProvider provider;
 	private CloudAccessFS fs;
 
@@ -45,10 +46,15 @@ public class AccessPatternIntegrationTest {
 	void setup(@TempDir Path tmpDir) throws IOException {
 		this.mirrored = tmpDir.resolve("mirrored");
 		this.cacheDir = tmpDir.resolve("cache");
+		this.lostNFound = tmpDir.resolve("lost+Found");
 		Files.createDirectory(this.mirrored);
 		Files.createDirectory(this.cacheDir);
+		System.setProperty("org.cryptomator.fusecloudaccess.cacheDir", cacheDir.toString());
+		System.setProperty("org.cryptomator.fusecloudaccess.lostAndFoundDir", lostNFound.toString());
 		this.provider = CloudAccess.toLocalFileSystem(this.mirrored);
-		this.fs = CloudAccessFS.createNewFileSystem(provider, 1000, this.cacheDir, CloudPath.of("/"));
+		this.fs = CloudAccessFS.createNewFileSystem(provider);
+
+		fs.init(null);
 	}
 
 	@Test
@@ -65,7 +71,7 @@ public class AccessPatternIntegrationTest {
 		fs.mkdir("/foo.txt-temp3000", 0755);
 
 		// wait a bit (so that we can check if st_mtim updated)
-		Thread.sleep(100);
+		Thread.sleep(2000);
 
 		// echo "asdasd" > foo.txt-temp3000/foo.txt
 		FuseFileInfo fi2 = TestFileInfo.create();
@@ -135,7 +141,7 @@ public class AccessPatternIntegrationTest {
 		fs.mkdir("/foo.txt-temp3000", 0755);
 
 		// wait a bit (so that we can check if st_mtim updated)
-		Thread.sleep(100);
+		Thread.sleep(2000);
 
 		// echo "asdasd" > foo.txt-temp3000/foo.txt
 		FuseFileInfo fi3 = TestFileInfo.create();
@@ -221,7 +227,7 @@ public class AccessPatternIntegrationTest {
 	@DisplayName("simulates \"get attributes during write\" access pattern")
 	void testGetAttributesDuringWrite() {
 		provider = CloudAccess.vaultFormat8GCMCloudAccess(CloudAccess.toLocalFileSystem(this.mirrored), CloudPath.of("/"), Base64.getDecoder().decode("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="));
-		fs = CloudAccessFS.createNewFileSystem(provider, 1000, this.cacheDir, CloudPath.of("/"));
+		fs = CloudAccessFS.createNewFileSystem(provider);
 
 		var path = "/foo.txt";
 
