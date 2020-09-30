@@ -491,7 +491,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 
 	CompletionStage<Integer> rmdirInternal(CloudPath path) {
 		openFileFactory.deleteDescendants(path);
-		return provider.delete(path) //
+		return provider.deleteFolder(path) //
 				.thenApply(ignored -> 0) //
 				.exceptionally(e -> {
 					if (e instanceof NotFoundException) {
@@ -520,7 +520,7 @@ public class CloudAccessFS extends FuseStubFS implements FuseFS {
 	// visible for testing
 	CompletionStage<Integer> unlinkInternal(CloudPath path) {
 		openFileFactory.delete(path);
-		return provider.delete(path) //
+		return provider.deleteFile(path) //
 				.thenApply(ignored -> 0) //
 				.exceptionally(e -> {
 					if (e instanceof NotFoundException) {

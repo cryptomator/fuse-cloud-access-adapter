@@ -795,7 +795,7 @@ public class CloudAccessFSTest {
 		@DisplayName("unlink(...) returns 0 on success")
 		@Test
 		public void testOnSuccessReturnsZero() {
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.completedFuture(null));
+			Mockito.when(provider.deleteFile(PATH)).thenReturn(CompletableFuture.completedFuture(null));
 
 			var actualResult = cloudFs.unlink(PATH.toString());
 
@@ -805,7 +805,7 @@ public class CloudAccessFSTest {
 		@DisplayName("unlink(...) returns ENOENT if path not found")
 		@Test
 		public void testNotFoundExceptionReturnsENOENT() {
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
+			Mockito.when(provider.deleteFile(PATH)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
 
 			var actualResult = cloudFs.unlink(PATH.toString());
 
@@ -817,7 +817,7 @@ public class CloudAccessFSTest {
 		@ValueSource(classes = {CloudProviderException.class, Exception.class})
 		public void testUnlinkReturnsEIOOnException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(e));
+			Mockito.when(provider.deleteFile(PATH)).thenReturn(CompletableFuture.failedFuture(e));
 
 			var actualResult = cloudFs.unlink(PATH.toString());
 
@@ -843,7 +843,7 @@ public class CloudAccessFSTest {
 		@Test
 		@DisplayName("rmdir() returns 0 on success")
 		public void testOnSuccessReturnsZero() {
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.completedFuture(null));
+			Mockito.when(provider.deleteFolder(PATH)).thenReturn(CompletableFuture.completedFuture(null));
 
 			var actualResult = cloudFs.rmdir(PATH.toString());
 
@@ -853,7 +853,7 @@ public class CloudAccessFSTest {
 		@Test
 		@DisplayName("rmdir() returns ENOENT if not found")
 		public void testNotFoundReturnsENOENT() {
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
+			Mockito.when(provider.deleteFolder(PATH)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
 
 			var actualResult = cloudFs.rmdir(PATH.toString());
 
@@ -865,7 +865,7 @@ public class CloudAccessFSTest {
 		@ValueSource(classes = {CloudProviderException.class, Exception.class})
 		public void testOtherErrorsReturnEIO(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(e));
+			Mockito.when(provider.deleteFolder(PATH)).thenReturn(CompletableFuture.failedFuture(e));
 
 			var actualResult = cloudFs.rmdir(PATH.toString());
 
