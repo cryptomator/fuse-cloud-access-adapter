@@ -87,27 +87,22 @@ public class CloudAccessFSTest {
 	}
 
 	@Nested
-	class ReturnOrTimeout {
+	class AwaitCompletion {
 
-		@BeforeEach
-		public void setup() {
-			Mockito.when(config.getProviderResponseTimeoutSeconds()).thenReturn(1);
-		}
-
-		@DisplayName("test returnOrTimeout() returns expected result on regular execution")
+		@DisplayName("test awaitCompletion() returns expected result on regular execution")
 		@Test
-		public void testReturnOrTimeoutSucceeds() {
+		public void testAwaitCompletionSucceeds() {
 			int expectedResult = 1337;
 			var future = CompletableFuture.completedFuture(expectedResult);
-			Assertions.assertEquals(expectedResult, cloudFs.returnOrTimeout(future));
+			Assertions.assertEquals(expectedResult, cloudFs.awaitCompletion(future));
 		}
 
-		@DisplayName("test returnOrTimeout() returns EINTR on interrupt")
+		@DisplayName("test awaitCompletion() returns EINTR on interrupt")
 		@Test
-		public void testReturnOrTimeoutInterrupted() throws InterruptedException {
+		public void testAwaitCompletionInterrupted() throws InterruptedException {
 			AtomicInteger actualResult = new AtomicInteger();
 			Thread t = new Thread(() -> {
-				actualResult.set(cloudFs.returnOrTimeout(new CompletableFuture<>()));
+				actualResult.set(cloudFs.awaitCompletion(new CompletableFuture<>()));
 			});
 			t.start();
 			t.interrupt();
@@ -115,17 +110,11 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.EINTR(), actualResult.get());
 		}
 
-		@DisplayName("test returnOrTimeout() returns EIO on ExecutionException")
+		@DisplayName("test awaitCompletion() returns EIO on ExecutionException")
 		@Test
-		public void testReturnOrTimeoutExecutionException() {
+		public void testAwaitCompletionExecutionException() {
 			CompletableFuture future = CompletableFuture.failedFuture(new CloudProviderException());
-			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.returnOrTimeout(future));
-		}
-
-		@DisplayName("test returnOrTimeout() return ETIMEDOUT on timeout")
-		@Test
-		public void testReturnOrTimeoutTimeouts() {
-			Assertions.assertEquals(-ErrorCodes.ETIMEDOUT(), cloudFs.returnOrTimeout(new CompletableFuture<>()));
+			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.awaitCompletion(future));
 		}
 
 	}
