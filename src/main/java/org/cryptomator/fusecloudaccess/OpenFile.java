@@ -9,6 +9,7 @@ import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
+import org.cryptomator.cloudaccess.api.exceptions.CloudTimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,6 +32,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 import static java.nio.file.StandardOpenOption.*;
 
@@ -231,7 +233,17 @@ class OpenFile implements Closeable {
 					var desiredLastByte = Math.min(size, offset + desiredCount); // reads not behind eof (lastByte is exclusive!)
 					var desiredRange = Range.closedOpen(offset, desiredLastByte);
 					var missingRanges = ImmutableRangeSet.of(desiredRange).difference(populatedRanges);
-					return CompletableFuture.allOf(missingRanges.asRanges().stream().map(this::loadMissing).toArray(CompletableFuture[]::new));
+					return CompletableFuture.allOf(missingRanges.asRanges().stream().map(this::loadMissing).toArray(CompletableFuture[]::new)) //
+							.handle((v, e) -> {
+								if (e != null && e.getCause() instanceof InterruptedIOException) {
+									return CompletableFuture.<Void>failedFuture(new CloudTimeoutException(e.getCause()));
+								} else if (e != null) {
+									return CompletableFuture.<Void>failedFuture(e);
+								} else {
+									return CompletableFuture.<Void>completedFuture(null);
+								}
+							}) //
+							.thenCompose(Function.identity());
 				}
 			}
 		} catch (IOException e) {
