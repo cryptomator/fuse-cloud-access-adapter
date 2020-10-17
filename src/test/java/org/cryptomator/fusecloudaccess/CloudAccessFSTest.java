@@ -87,27 +87,22 @@ public class CloudAccessFSTest {
 	}
 
 	@Nested
-	class ReturnOrTimeout {
+	class AwaitCompletion {
 
-		@BeforeEach
-		public void setup() {
-			Mockito.when(config.getProviderResponseTimeoutSeconds()).thenReturn(1);
-		}
-
-		@DisplayName("test returnOrTimeout() returns expected result on regular execution")
+		@DisplayName("test awaitCompletion() returns expected result on regular execution")
 		@Test
-		public void testReturnOrTimeoutSucceeds() {
+		public void testAwaitCompletionSucceeds() {
 			int expectedResult = 1337;
 			var future = CompletableFuture.completedFuture(expectedResult);
-			Assertions.assertEquals(expectedResult, cloudFs.returnOrTimeout(future));
+			Assertions.assertEquals(expectedResult, cloudFs.awaitCompletion(future));
 		}
 
-		@DisplayName("test returnOrTimeout() returns EINTR on interrupt")
+		@DisplayName("test awaitCompletion() returns EINTR on interrupt")
 		@Test
-		public void testReturnOrTimeoutInterrupted() throws InterruptedException {
+		public void testAwaitCompletionInterrupted() throws InterruptedException {
 			AtomicInteger actualResult = new AtomicInteger();
 			Thread t = new Thread(() -> {
-				actualResult.set(cloudFs.returnOrTimeout(new CompletableFuture<>()));
+				actualResult.set(cloudFs.awaitCompletion(new CompletableFuture<>()));
 			});
 			t.start();
 			t.interrupt();
@@ -115,17 +110,11 @@ public class CloudAccessFSTest {
 			Assertions.assertEquals(-ErrorCodes.EINTR(), actualResult.get());
 		}
 
-		@DisplayName("test returnOrTimeout() returns EIO on ExecutionException")
+		@DisplayName("test awaitCompletion() returns EIO on ExecutionException")
 		@Test
-		public void testReturnOrTimeoutExecutionException() {
+		public void testAwaitCompletionExecutionException() {
 			CompletableFuture future = CompletableFuture.failedFuture(new CloudProviderException());
-			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.returnOrTimeout(future));
-		}
-
-		@DisplayName("test returnOrTimeout() return ETIMEDOUT on timeout")
-		@Test
-		public void testReturnOrTimeoutTimeouts() {
-			Assertions.assertEquals(-ErrorCodes.ETIMEDOUT(), cloudFs.returnOrTimeout(new CompletableFuture<>()));
+			Assertions.assertEquals(-ErrorCodes.EIO(), cloudFs.awaitCompletion(future));
 		}
 
 	}
@@ -795,7 +784,7 @@ public class CloudAccessFSTest {
 		@DisplayName("unlink(...) returns 0 on success")
 		@Test
 		public void testOnSuccessReturnsZero() {
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.completedFuture(null));
+			Mockito.when(provider.deleteFile(PATH)).thenReturn(CompletableFuture.completedFuture(null));
 
 			var actualResult = cloudFs.unlink(PATH.toString());
 
@@ -805,7 +794,7 @@ public class CloudAccessFSTest {
 		@DisplayName("unlink(...) returns ENOENT if path not found")
 		@Test
 		public void testNotFoundExceptionReturnsENOENT() {
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
+			Mockito.when(provider.deleteFile(PATH)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
 
 			var actualResult = cloudFs.unlink(PATH.toString());
 
@@ -817,7 +806,7 @@ public class CloudAccessFSTest {
 		@ValueSource(classes = {CloudProviderException.class, Exception.class})
 		public void testUnlinkReturnsEIOOnException(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(e));
+			Mockito.when(provider.deleteFile(PATH)).thenReturn(CompletableFuture.failedFuture(e));
 
 			var actualResult = cloudFs.unlink(PATH.toString());
 
@@ -843,7 +832,7 @@ public class CloudAccessFSTest {
 		@Test
 		@DisplayName("rmdir() returns 0 on success")
 		public void testOnSuccessReturnsZero() {
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.completedFuture(null));
+			Mockito.when(provider.deleteFolder(PATH)).thenReturn(CompletableFuture.completedFuture(null));
 
 			var actualResult = cloudFs.rmdir(PATH.toString());
 
@@ -853,7 +842,7 @@ public class CloudAccessFSTest {
 		@Test
 		@DisplayName("rmdir() returns ENOENT if not found")
 		public void testNotFoundReturnsENOENT() {
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
+			Mockito.when(provider.deleteFolder(PATH)).thenReturn(CompletableFuture.failedFuture(new NotFoundException()));
 
 			var actualResult = cloudFs.rmdir(PATH.toString());
 
@@ -865,7 +854,7 @@ public class CloudAccessFSTest {
 		@ValueSource(classes = {CloudProviderException.class, Exception.class})
 		public void testOtherErrorsReturnEIO(Class<Exception> exceptionClass) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
 			Exception e = exceptionClass.getDeclaredConstructor().newInstance();
-			Mockito.when(provider.delete(PATH)).thenReturn(CompletableFuture.failedFuture(e));
+			Mockito.when(provider.deleteFolder(PATH)).thenReturn(CompletableFuture.failedFuture(e));
 
 			var actualResult = cloudFs.rmdir(PATH.toString());
 
