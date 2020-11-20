@@ -48,7 +48,9 @@ class CompletableAsynchronousFileChannel implements Closeable {
 				return CompletableFuture.completedFuture(totalRead);
 			}
 			buffer.flip();
-			ptr.put(totalRead, buffer.array(), buffer.position(), buffer.limit());
+			assert buffer.position() == 0;
+			assert buffer.remaining() == read;
+			ptr.put(totalRead, buffer.array(), buffer.position(), buffer.remaining());
 			if (read == remaining // DONE, read requested number of bytes
 					|| read < n) { // EOF
 				return CompletableFuture.completedFuture(totalRead + read);
