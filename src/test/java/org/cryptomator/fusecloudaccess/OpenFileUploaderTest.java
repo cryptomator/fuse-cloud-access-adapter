@@ -291,7 +291,7 @@ public class OpenFileUploaderTest {
 						return CompletableFuture.completedFuture(null);
 					});
 			Mockito.when(provider.move(Mockito.any(), Mockito.eq(cloudPath2), Mockito.eq(true))).thenReturn(CompletableFuture.completedFuture(cloudPath2));
-			Mockito.when(openFile.getPath()).thenReturn(cloudPath1); // initial target path
+			Mockito.doReturn(cloudPath1).when(openFile).getPath(); // initial target path
 			Assumptions.assumeFalse(cloudPath1.equals(cloudPath2));
 
 			Future<Void> pendingUpload = CompletableFuture.runAsync(() -> {
@@ -304,7 +304,7 @@ public class OpenFileUploaderTest {
 				}
 			});
 			persistedBarrier.await();
-			Mockito.when(openFile.getPath()).thenReturn(cloudPath2); // set a new target path
+			Mockito.doReturn(cloudPath2).when(openFile).getPath(); // set a new target path
 			uploadedBarrier.await();
 			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> pendingUpload.get());
 
