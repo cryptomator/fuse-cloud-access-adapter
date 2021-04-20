@@ -40,20 +40,6 @@
 		</license>
 	</licenses>
 
-	<repositories>
-		<repository>
-			<id>jcenter</id>
-			<url>https://jcenter.bintray.com</url>
-		</repository>
-	</repositories>
-
-	<distributionManagement>
-		<repository>
-			<id>bintray-jcenter</id>
-			<url>https://api.bintray.com/maven/cryptomator/maven/fuse-cloud-access-adapter/;publish=1</url>
-		</repository>
-	</distributionManagement>
-
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
