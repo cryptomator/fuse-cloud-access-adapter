@@ -36,6 +36,7 @@ public class OpenFileTest {
 	private CompletableAsynchronousFileChannel fileChannel;
 	private OpenFile openFile;
 	private RangeSet<Long> populatedRanges;
+	private RangeSet<Long> currentActiveRequestedRanges;
 
 	@BeforeEach
 	public void setup() throws IOException {
@@ -43,7 +44,8 @@ public class OpenFileTest {
 		this.provider = Mockito.mock(CloudProvider.class);
 		this.fileChannel = Mockito.mock(CompletableAsynchronousFileChannel.class);
 		this.populatedRanges = Mockito.mock(RangeSet.class);
-		this.openFile = new OpenFile(file, fileChannel, provider, populatedRanges, Instant.EPOCH);
+		this.currentActiveRequestedRanges = Mockito.mock(RangeSet.class);
+		this.openFile = new OpenFile(file, fileChannel, provider, populatedRanges, currentActiveRequestedRanges, Instant.EPOCH);
 		Mockito.when(fileChannel.size()).thenReturn(100l);
 		Mockito.when(fileChannel.isOpen()).thenReturn(true);
 	}
@@ -214,6 +216,7 @@ public class OpenFileTest {
 			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 			Mockito.verify(fileSpy, Mockito.never()).mergeData(Mockito.any(), Mockito.any());
+			Mockito.verify(currentActiveRequestedRanges, Mockito.never()).addAll(Mockito.anySet());
 		}
 
 		@DisplayName("region behind at EOF (100)")
@@ -225,6 +228,7 @@ public class OpenFileTest {
 			Assertions.assertThrows(IllegalArgumentException.class, () -> fileSpy.load(offset, 10));
 
 			Mockito.verify(fileSpy, Mockito.never()).mergeData(Mockito.any(), Mockito.any());
+			Mockito.verify(currentActiveRequestedRanges, Mockito.never()).addAll(Mockito.anySet());
 		}
 
 		@Test
@@ -239,6 +243,10 @@ public class OpenFileTest {
 			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 			Mockito.verify(fileSpy).mergeData(Mockito.argThat(r -> r.lowerEndpoint() == 90l && r.upperEndpoint() >= 100), Mockito.eq(inputStream));
+
+			TreeRangeSet<Long> rangeSet = TreeRangeSet.create();
+			rangeSet.add(Range.closedOpen(90l, 100l));
+			Mockito.verify(currentActiveRequestedRanges).addAll(rangeSet);
 		}
 
 		@Test
@@ -252,6 +260,10 @@ public class OpenFileTest {
 			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 
 			Mockito.verify(fileSpy).mergeData(Mockito.argThat(r -> r.lowerEndpoint() == 50l && r.upperEndpoint() >= 60), Mockito.eq(inputStream));
+
+			TreeRangeSet<Long> rangeSet = TreeRangeSet.create();
+			rangeSet.add(Range.closedOpen(50l, 100l));
+			Mockito.verify(currentActiveRequestedRanges).addAll(rangeSet);
 		}
 
 		@Test
@@ -267,6 +279,11 @@ public class OpenFileTest {
 
 			Assertions.assertTrue(futureResult.toCompletableFuture().isCompletedExceptionally());
 			Assertions.assertEquals(e, thrown);
+
+			TreeRangeSet<Long> rangeSet = TreeRangeSet.create();
+			rangeSet.add(Range.closedOpen(50l, 100l));
+			Mockito.verify(currentActiveRequestedRanges).addAll(rangeSet);
+			Mockito.verify(currentActiveRequestedRanges).removeAll(rangeSet);
 		}
 
 		@Test
@@ -283,6 +300,11 @@ public class OpenFileTest {
 
 			Assertions.assertTrue(futureResult.toCompletableFuture().isCompletedExceptionally());
 			Assertions.assertEquals(e, thrown.getCause());
+
+			TreeRangeSet<Long> rangeSet = TreeRangeSet.create();
+			rangeSet.add(Range.closedOpen(50l, 100l));
+			Mockito.verify(currentActiveRequestedRanges).addAll(rangeSet);
+			Mockito.verify(currentActiveRequestedRanges).removeAll(rangeSet);
 		}
 
 		@Test
@@ -293,6 +315,7 @@ public class OpenFileTest {
 
 			Mockito.verify(fileSpy, Mockito.never()).mergeData(Mockito.any(), Mockito.any());
 			Mockito.verify(provider, Mockito.never()).read(Mockito.any(), Mockito.anyLong(), Mockito.anyLong(), Mockito.any());
+			Mockito.verify(currentActiveRequestedRanges, Mockito.never()).addAll(Mockito.anySet());
 		}
 
 		@Test
@@ -305,6 +328,7 @@ public class OpenFileTest {
 
 			Mockito.verify(fileSpy, Mockito.never()).mergeData(Mockito.any(), Mockito.any());
 			Mockito.verify(provider, Mockito.never()).read(Mockito.any(), Mockito.anyLong(), Mockito.anyLong(), Mockito.any());
+			Mockito.verify(currentActiveRequestedRanges, Mockito.never()).addAll(Mockito.anySet());
 		}
 
 		@Test
@@ -318,6 +342,10 @@ public class OpenFileTest {
 			var futureResult = fileSpy.load(50, 20);
 			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> futureResult.toCompletableFuture().get());
 			Mockito.verify(fileSpy).mergeData(Mockito.argThat(r -> r.lowerEndpoint() == 60l && r.upperEndpoint() >= 70), Mockito.eq(inputStream));
+
+			TreeRangeSet<Long> rangeSet = TreeRangeSet.create();
+			rangeSet.add(Range.closedOpen(60l, 100l));
+			Mockito.verify(currentActiveRequestedRanges).addAll(rangeSet);
 		}
 
 	}
@@ -377,7 +405,7 @@ public class OpenFileTest {
 		public void setup() {
 			var prePopulatedRanges = ImmutableRangeSet.of(Range.closedOpen(0l, 50l));
 			populatedRanges = Mockito.spy(TreeRangeSet.create(prePopulatedRanges));
-			openFile = new OpenFile(file, fileChannel, provider, populatedRanges, Instant.EPOCH);
+			openFile = new OpenFile(file, fileChannel, provider, populatedRanges, currentActiveRequestedRanges, Instant.EPOCH);
 			this.fileSpy = Mockito.spy(openFile);
 		}
 
@@ -409,6 +437,9 @@ public class OpenFileTest {
 			Mockito.verify(populatedRanges).add(Range.closedOpen(100l, 110l));
 			Mockito.verify(populatedRanges).add(Range.closedOpen(120l, 150l));
 			Assertions.assertTrue(populatedRanges.encloses(range));
+
+			Mockito.verify(currentActiveRequestedRanges).remove(Range.closedOpen(100l, 110l));
+			Mockito.verify(currentActiveRequestedRanges).remove(Range.closedOpen(120l, 150l));
 		}
 
 		@Test
@@ -423,6 +454,8 @@ public class OpenFileTest {
 
 			Mockito.verify(populatedRanges).add(Range.closedOpen(50l, 100l));
 			Assertions.assertTrue(populatedRanges.encloses(range));
+
+			Mockito.verify(currentActiveRequestedRanges).remove(Range.closedOpen(50l, 100l));
 		}
 
 		@Test
@@ -435,6 +468,8 @@ public class OpenFileTest {
 
 			Mockito.verify(populatedRanges, Mockito.never()).add(Mockito.any());
 			Assertions.assertTrue(populatedRanges.encloses(range));
+
+			Mockito.verify(currentActiveRequestedRanges, Mockito.never()).remove(Mockito.any());
 		}
 
 		@Test
@@ -449,6 +484,8 @@ public class OpenFileTest {
 			Mockito.verify(populatedRanges).add(Range.closedOpen(100l, 110l));
 			Assertions.assertFalse(populatedRanges.encloses(range));
 			Assertions.assertTrue(populatedRanges.intersects(range));
+
+			Mockito.verify(currentActiveRequestedRanges).remove(Range.closedOpen(100l, 110l));
 		}
 
 		@Test
@@ -460,6 +497,8 @@ public class OpenFileTest {
 			fileSpy.mergeData(Range.closedOpen(100l, 100l), in);
 
 			Mockito.verify(populatedRanges, Mockito.never()).add(Mockito.any());
+
+			Mockito.verify(currentActiveRequestedRanges, Mockito.never()).remove(Mockito.any());
 		}
 
 	}

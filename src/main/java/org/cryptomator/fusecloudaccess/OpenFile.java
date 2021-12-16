@@ -44,6 +44,7 @@ class OpenFile implements Closeable {
 	private final CompletableAsynchronousFileChannel fc;
 	private final CloudProvider provider;
 	private final RangeSet<Long> populatedRanges;
+	private final RangeSet<Long> currentActiveRequestedRanges;
 	private final AtomicInteger openFileHandleCount;
 	private final AtomicReference<OpenFile.State> state;
 	private volatile CloudPath path;
@@ -52,11 +53,12 @@ class OpenFile implements Closeable {
 	public enum State {UNMODIFIED, NEEDS_UPLOAD, UPLOADING, NEEDS_REUPLOAD}
 
 	// visible for testing
-	OpenFile(CloudPath path, CompletableAsynchronousFileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, Instant initialLastModified) {
+	OpenFile(CloudPath path, CompletableAsynchronousFileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, RangeSet<Long> currentActiveRequestedRanges, Instant initialLastModified) {
 		this.path = path;
 		this.fc = fc;
 		this.provider = provider;
 		this.populatedRanges = populatedRanges;
+		this.currentActiveRequestedRanges = currentActiveRequestedRanges;
 		this.openFileHandleCount = new AtomicInteger();
 		this.state = new AtomicReference<>(State.UNMODIFIED);
 		this.lastModified = initialLastModified;
@@ -84,7 +86,7 @@ class OpenFile implements Closeable {
 				throw new IOException("Failed to create file", e);
 			}
 		}
-		return new OpenFile(path, new CompletableAsynchronousFileChannel(fc), provider, TreeRangeSet.create(), Instant.now());
+		return new OpenFile(path, new CompletableAsynchronousFileChannel(fc), provider, TreeRangeSet.create(), TreeRangeSet.create(), Instant.now());
 	}
 
 	public AtomicInteger getOpenFileHandleCount() {
@@ -196,7 +198,7 @@ class OpenFile implements Closeable {
 		setLastModified(Instant.now().truncatedTo(ChronoUnit.SECONDS));
 		markPopulatedIfGrowing(offset);
 		return fc.writeFromPointer(buf, offset, count).thenApply(written -> {
-			synchronized (populatedRanges) {
+			synchronized (this) {
 				populatedRanges.add(Range.closedOpen(offset, offset + written));
 			}
 			return written;
@@ -225,19 +227,21 @@ class OpenFile implements Closeable {
 			}
 			var requiredLastByte = Math.min(size, offset + count); // reads not behind eof (lastByte is exclusive!)
 			var requiredRange = Range.closedOpen(offset, requiredLastByte);
-			synchronized (populatedRanges) {
-				if (requiredRange.isEmpty() || populatedRanges.encloses(requiredRange)) {
+			synchronized (this) {
+				if (requiredRange.isEmpty() || populatedRanges.encloses(requiredRange) || currentActiveRequestedRanges.encloses(requiredRange)) {
 					return CompletableFuture.completedFuture(null);
 				} else {
 					var desiredCount = Math.max(count, READAHEAD_SIZE); // reads at least the readahead
 					var desiredLastByte = Math.min(size, offset + desiredCount); // reads not behind eof (lastByte is exclusive!)
 					var desiredRange = Range.closedOpen(offset, desiredLastByte);
-					var missingRanges = ImmutableRangeSet.of(desiredRange).difference(populatedRanges);
+					var missingRanges = ImmutableRangeSet.of(desiredRange).difference(populatedRanges).difference(currentActiveRequestedRanges);
+					currentActiveRequestedRanges.addAll(missingRanges);
 					return CompletableFuture.allOf(missingRanges.asRanges().stream().map(this::loadMissing).toArray(CompletableFuture[]::new)) //
 							.handle((v, e) -> {
 								if (e != null && e.getCause() instanceof InterruptedIOException) {
 									return CompletableFuture.<Void>failedFuture(new CloudTimeoutException(e.getCause()));
 								} else if (e != null) {
+									currentActiveRequestedRanges.removeAll(missingRanges);
 									return CompletableFuture.<Void>failedFuture(e);
 								} else {
 									return CompletableFuture.<Void>completedFuture(null);
@@ -274,7 +278,7 @@ class OpenFile implements Closeable {
 	 */
 	// visible for testing
 	CompletableFuture<Void> mergeData(Range<Long> range, InputStream source) {
-		synchronized (populatedRanges) {
+		synchronized (this) {
 			var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges).asRanges().iterator();
 			return mergeDataInternal(missingRanges, source, range.lowerEndpoint());
 		}
@@ -300,8 +304,10 @@ class OpenFile implements Closeable {
 		assert position == range.lowerEndpoint();
 		var count = range.upperEndpoint() - range.lowerEndpoint();
 		return fc.transferFrom(source, position, count).thenCompose(transferred -> {
-			synchronized (populatedRanges) {
-				populatedRanges.add(Range.closedOpen(position, position + transferred));
+			synchronized (this) {
+				var populatedRange = Range.closedOpen(position, position + transferred);
+				populatedRanges.add(populatedRange);
+				currentActiveRequestedRanges.remove(populatedRange);
 			}
 			return mergeDataInternal(missingRanges, source, position + transferred);
 		});
@@ -340,7 +346,7 @@ class OpenFile implements Closeable {
 	private void markPopulatedIfGrowing(long newSize) {
 		long oldSize = getSize();
 		if (newSize > oldSize) {
-			synchronized (populatedRanges) {
+			synchronized (this) {
 				populatedRanges.add(Range.closedOpen(oldSize, newSize));
 			}
 		}
