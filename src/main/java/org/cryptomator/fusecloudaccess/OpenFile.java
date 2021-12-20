@@ -11,7 +11,6 @@ import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudPath;
 import org.cryptomator.cloudaccess.api.CloudProvider;
 import org.cryptomator.cloudaccess.api.ProgressListener;
-import org.cryptomator.cloudaccess.api.exceptions.CloudTimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,8 +34,6 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import static java.nio.file.StandardOpenOption.*;
 
@@ -71,10 +68,10 @@ class OpenFile implements Closeable {
 	/**
 	 * Creates a cached representation of a file. File contents are loaded on demand from the provided cloud provider.
 	 *
-	 * @param path                The path of this file in the cloud
-	 * @param tmpFilePath         Where to store the volatile cache
-	 * @param provider            The cloud provider used to load and persist file contents
-	 * @param initialSize         Must be 0 for newly created files. (Use {@link #truncate(long)} if you want to grow it)
+	 * @param path        The path of this file in the cloud
+	 * @param tmpFilePath Where to store the volatile cache
+	 * @param provider    The cloud provider used to load and persist file contents
+	 * @param initialSize Must be 0 for newly created files. (Use {@link #truncate(long)} if you want to grow it)
 	 * @return The created file
 	 * @throws IOException I/O errors during creation of the cache file located at <code>tmpFilePath</code>
 	 */
@@ -296,11 +293,9 @@ class OpenFile implements Closeable {
 	 * @return
 	 */
 	// visible for testing
-	CompletableFuture<Void> mergeData(Range<Long> range, InputStream source) {
-		synchronized (this) {
-			var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges).asRanges().iterator();
-			return mergeDataInternal(missingRanges, source, range.lowerEndpoint());
-		}
+	synchronized CompletableFuture<Void> mergeData(Range<Long> range, InputStream source) {
+		var missingRanges = ImmutableRangeSet.of(range).difference(populatedRanges).asRanges().iterator();
+		return mergeDataInternal(missingRanges, source, range.lowerEndpoint());
 	}
 
 	private CompletableFuture<Void> mergeDataInternal(Iterator<Range<Long>> missingRanges, InputStream source, final long pos) {
