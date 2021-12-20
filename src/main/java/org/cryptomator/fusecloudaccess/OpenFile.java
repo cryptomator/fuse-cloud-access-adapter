@@ -3,7 +3,9 @@ package org.cryptomator.fusecloudaccess;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableRangeSet;
 import com.google.common.collect.Range;
+import com.google.common.collect.RangeMap;
 import com.google.common.collect.RangeSet;
+import com.google.common.collect.TreeRangeMap;
 import com.google.common.collect.TreeRangeSet;
 import jnr.ffi.Pointer;
 import org.cryptomator.cloudaccess.api.CloudPath;
@@ -26,6 +28,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -33,6 +36,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static java.nio.file.StandardOpenOption.*;
 
@@ -44,7 +48,7 @@ class OpenFile implements Closeable {
 	private final CompletableAsynchronousFileChannel fc;
 	private final CloudProvider provider;
 	private final RangeSet<Long> populatedRanges;
-	private final RangeSet<Long> currentActiveRequestedRanges;
+	private final RangeMap<Long, CompletionStage<Void>> activeRequests;
 	private final AtomicInteger openFileHandleCount;
 	private final AtomicReference<OpenFile.State> state;
 	private volatile CloudPath path;
@@ -53,12 +57,12 @@ class OpenFile implements Closeable {
 	public enum State {UNMODIFIED, NEEDS_UPLOAD, UPLOADING, NEEDS_REUPLOAD}
 
 	// visible for testing
-	OpenFile(CloudPath path, CompletableAsynchronousFileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, RangeSet<Long> currentActiveRequestedRanges, Instant initialLastModified) {
+	OpenFile(CloudPath path, CompletableAsynchronousFileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, RangeMap<Long, CompletionStage<Void>> activeRequests, Instant initialLastModified) {
 		this.path = path;
 		this.fc = fc;
 		this.provider = provider;
 		this.populatedRanges = populatedRanges;
-		this.currentActiveRequestedRanges = currentActiveRequestedRanges;
+		this.activeRequests = activeRequests;
 		this.openFileHandleCount = new AtomicInteger();
 		this.state = new AtomicReference<>(State.UNMODIFIED);
 		this.lastModified = initialLastModified;
@@ -86,7 +90,7 @@ class OpenFile implements Closeable {
 				throw new IOException("Failed to create file", e);
 			}
 		}
-		return new OpenFile(path, new CompletableAsynchronousFileChannel(fc), provider, TreeRangeSet.create(), TreeRangeSet.create(), Instant.now());
+		return new OpenFile(path, new CompletableAsynchronousFileChannel(fc), provider, TreeRangeSet.create(), TreeRangeMap.create(), Instant.now());
 	}
 
 	public AtomicInteger getOpenFileHandleCount() {
@@ -228,26 +232,24 @@ class OpenFile implements Closeable {
 			var requiredLastByte = Math.min(size, offset + count); // reads not behind eof (lastByte is exclusive!)
 			var requiredRange = Range.closedOpen(offset, requiredLastByte);
 			synchronized (this) {
-				if (requiredRange.isEmpty() || populatedRanges.encloses(requiredRange) || currentActiveRequestedRanges.encloses(requiredRange)) {
+				if (requiredRange.isEmpty() || populatedRanges.encloses(requiredRange)) {
 					return CompletableFuture.completedFuture(null);
 				} else {
 					var desiredCount = Math.max(count, READAHEAD_SIZE); // reads at least the readahead
 					var desiredLastByte = Math.min(size, offset + desiredCount); // reads not behind eof (lastByte is exclusive!)
 					var desiredRange = Range.closedOpen(offset, desiredLastByte);
-					var missingRanges = ImmutableRangeSet.of(desiredRange).difference(populatedRanges).difference(currentActiveRequestedRanges);
-					currentActiveRequestedRanges.addAll(missingRanges);
-					return CompletableFuture.allOf(missingRanges.asRanges().stream().map(this::loadMissing).toArray(CompletableFuture[]::new)) //
-							.handle((v, e) -> {
-								if (e != null && e.getCause() instanceof InterruptedIOException) {
-									return CompletableFuture.<Void>failedFuture(new CloudTimeoutException(e.getCause()));
-								} else if (e != null) {
-									currentActiveRequestedRanges.removeAll(missingRanges);
-									return CompletableFuture.<Void>failedFuture(e);
-								} else {
-									return CompletableFuture.<Void>completedFuture(null);
-								}
-							}) //
-							.thenCompose(Function.identity());
+
+					var activeRanges = ImmutableRangeSet.copyOf(activeRequests.asMapOfRanges().keySet());
+					var missingRanges = ImmutableRangeSet.of(desiredRange).difference(populatedRanges).difference(activeRanges);
+
+					var relevantRequests = new HashSet<>(activeRequests.subRangeMap(desiredRange).asMapOfRanges().values());
+
+					for (var range : missingRanges.asRanges()) {
+						var request = loadMissing(range);
+						relevantRequests.add(request);
+					}
+
+					return CompletableFuture.allOf(relevantRequests.stream().map(CompletionStage::toCompletableFuture).toArray(CompletableFuture[]::new));
 				}
 			}
 		} catch (IOException e) {
@@ -257,12 +259,29 @@ class OpenFile implements Closeable {
 
 	private CompletionStage<Void> loadMissing(Range<Long> requestedRange) {
 		assert !populatedRanges.intersects(requestedRange); // synchronized by caller
+		assert activeRequests.subRangeMap(requestedRange).asMapOfRanges().isEmpty(); // synchronized by caller
 		long offset = requestedRange.lowerEndpoint();
 		long size = requestedRange.upperEndpoint() - requestedRange.lowerEndpoint();
-		return provider.read(path, offset, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
+
+		var read = provider.read(path, offset, size, ProgressListener.NO_PROGRESS_AWARE).thenCompose(in -> {
 			var mergeTask = mergeData(requestedRange, in);
 			return mergeTask.whenComplete((result, exception) -> closeQuietly(in));
 		});
+
+		activeRequests.put(requestedRange, read);
+
+		read.whenComplete((result, error) -> completedRequest(requestedRange, read));
+
+		return read;
+	}
+
+	// visible for testing
+	synchronized void completedRequest(Range<Long> requestedRange, CompletionStage<Void> request) {
+		var entry = activeRequests.getEntry(requestedRange.lowerEndpoint());
+		// only remove active request if it hasn't been replaced by a broader request
+		if (entry.getKey().equals(requestedRange) && entry.getValue().equals(request)) {
+			activeRequests.remove(requestedRange);
+		}
 	}
 
 	/**
@@ -307,7 +326,7 @@ class OpenFile implements Closeable {
 			synchronized (this) {
 				var populatedRange = Range.closedOpen(position, position + transferred);
 				populatedRanges.add(populatedRange);
-				currentActiveRequestedRanges.remove(populatedRange);
+				activeRequests.remove(populatedRange);
 			}
 			return mergeDataInternal(missingRanges, source, position + transferred);
 		});
