@@ -21,12 +21,15 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
@@ -461,7 +464,7 @@ public class OpenFileTest {
 			Assumptions.assumeFalse(populatedRanges.encloses(range));
 			Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(100l), Mockito.eq(20l))).thenReturn(CompletableFuture.completedFuture(20l));
 
-			fileSpy.mergeData(range, in);
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> fileSpy.mergeData(range, in));
 
 			Mockito.verify(populatedRanges).add(Range.closedOpen(100l, 120l));
 			Assertions.assertTrue(populatedRanges.encloses(range));
@@ -477,14 +480,11 @@ public class OpenFileTest {
 			Mockito.when(in.skip(10l)).thenReturn(10l);
 			Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(120l), Mockito.eq(30l))).thenReturn(CompletableFuture.completedFuture(30l));
 
-			fileSpy.mergeData(range, in);
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> fileSpy.mergeData(range, in));
 
 			Mockito.verify(populatedRanges).add(Range.closedOpen(100l, 110l));
 			Mockito.verify(populatedRanges).add(Range.closedOpen(120l, 150l));
 			Assertions.assertTrue(populatedRanges.encloses(range));
-
-			Mockito.verify(activeRequests).remove(Range.closedOpen(100l, 110l));
-			Mockito.verify(activeRequests).remove(Range.closedOpen(120l, 150l));
 		}
 
 		@Test
@@ -495,12 +495,10 @@ public class OpenFileTest {
 			Mockito.when(in.skip(50l)).thenReturn(50l);
 			Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(50l), Mockito.eq(50l))).thenReturn(CompletableFuture.completedFuture(50l));
 
-			fileSpy.mergeData(range, in);
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> fileSpy.mergeData(range, in));
 
 			Mockito.verify(populatedRanges).add(Range.closedOpen(50l, 100l));
 			Assertions.assertTrue(populatedRanges.encloses(range));
-
-			Mockito.verify(activeRequests).remove(Range.closedOpen(50l, 100l));
 		}
 
 		@Test
@@ -509,11 +507,10 @@ public class OpenFileTest {
 			var range = Range.closedOpen(10l, 20l);
 			Assumptions.assumeTrue(populatedRanges.encloses(range));
 
-			fileSpy.mergeData(range, in);
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> fileSpy.mergeData(range, in));
 
 			Mockito.verify(populatedRanges, Mockito.never()).add(Mockito.any());
 			Assertions.assertTrue(populatedRanges.encloses(range));
-
 			Mockito.verify(activeRequests, Mockito.never()).remove(Mockito.any());
 		}
 
@@ -524,13 +521,11 @@ public class OpenFileTest {
 			Assumptions.assumeFalse(populatedRanges.encloses(range));
 			Mockito.when(fileChannel.transferFrom(Mockito.any(), Mockito.eq(100l), Mockito.eq(20l))).thenReturn(CompletableFuture.completedFuture(10l));
 
-			fileSpy.mergeData(range, in);
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> fileSpy.mergeData(range, in));
 
 			Mockito.verify(populatedRanges).add(Range.closedOpen(100l, 110l));
 			Assertions.assertFalse(populatedRanges.encloses(range));
 			Assertions.assertTrue(populatedRanges.intersects(range));
-
-			Mockito.verify(activeRequests).remove(Range.closedOpen(100l, 110l));
 		}
 
 		@Test
@@ -539,11 +534,30 @@ public class OpenFileTest {
 			var range = Range.closedOpen(100l, 100l);
 			Assumptions.assumeTrue(range.isEmpty());
 
-			fileSpy.mergeData(Range.closedOpen(100l, 100l), in);
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> fileSpy.mergeData(Range.closedOpen(100l, 100l), in));
 
 			Mockito.verify(populatedRanges, Mockito.never()).add(Mockito.any());
-
 			Mockito.verify(activeRequests, Mockito.never()).remove(Mockito.any());
+		}
+
+		@Test
+		public void testMergeWithMultipleSubranges() {
+			populatedRanges.add(Range.closedOpen(105l, 106l));
+			var data = "hello world".getBytes(StandardCharsets.UTF_8);
+			var in = Mockito.spy(new ByteArrayInputStream(data));
+			Mockito.when(fileChannel.transferFrom(Mockito.eq(in), Mockito.anyLong(), Mockito.anyLong())).thenAnswer(invocation -> {
+				int position = invocation.<Long>getArgument(1).intValue();
+				int count = invocation.<Long>getArgument(2).intValue();
+				byte[] bytes = in.readNBytes(count);
+				Assertions.assertArrayEquals(Arrays.copyOfRange(data, position - 100, position - 100 + count), bytes);
+				return CompletableFuture.completedFuture((long) count);
+			});
+
+			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> fileSpy.mergeData(Range.closedOpen(100l, 111l), in).toCompletableFuture().get());
+
+			Mockito.verify(fileChannel).transferFrom(in, 100l, 5l); // transfer "hello"
+			Mockito.verify(in).skip(1l); // already populated
+			Mockito.verify(fileChannel).transferFrom(in, 106l, 5l); // transfer "world"
 		}
 
 	}

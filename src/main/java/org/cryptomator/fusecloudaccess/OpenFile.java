@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
@@ -289,7 +290,7 @@ class OpenFile implements Closeable {
 	 * unless hitting EOF on <code>source</code>.
 	 *
 	 * @param range  Where to place the data within the file channel
-	 * @param source The data source
+	 * @param source An input stream beginning at the first byte of the requested range
 	 * @return
 	 */
 	// visible for testing
@@ -298,30 +299,36 @@ class OpenFile implements Closeable {
 		return mergeDataInternal(missingRanges, source, range.lowerEndpoint());
 	}
 
-	private CompletableFuture<Void> mergeDataInternal(Iterator<Range<Long>> missingRanges, InputStream source, final long pos) {
+	private CompletableFuture<Void> mergeDataInternal(Iterator<Range<Long>> missingRanges, InputStream source, final long sourceOffset) {
 		if (!missingRanges.hasNext()) {
 			return CompletableFuture.completedFuture(null);
 		}
 		var range = missingRanges.next();
-		Preconditions.checkArgument(pos <= range.lowerEndpoint());
-		final long position;
-		if (pos < range.lowerEndpoint()) {
-			try {
-				long skipped = source.skip(range.lowerEndpoint() - pos);
-				position = pos + skipped;
-			} catch (IOException e) {
-				return CompletableFuture.failedFuture(e);
+		Preconditions.checkArgument(sourceOffset <= range.lowerEndpoint());
+
+		// inputstream may contain regions that aren't "missing".
+		// therefore we need to "skip" till the begin of our range:
+		try {
+			long p = sourceOffset;
+			while (p < range.lowerEndpoint()) {
+				var skipped = source.skip(range.lowerEndpoint() - p);
+				if (skipped == 0) {
+					throw new EOFException("failed to skip to begin of desired range");
+				}
+				p += skipped;
 			}
-		} else {
-			position = pos;
+			assert p == range.lowerEndpoint();
+		} catch (IOException e) {
+			return CompletableFuture.failedFuture(e);
 		}
-		assert position == range.lowerEndpoint();
+
+		// now transfer contents from inputstream to our file. repeat process for next range, when finished
+		long position = range.lowerEndpoint();
 		var count = range.upperEndpoint() - range.lowerEndpoint();
 		return fc.transferFrom(source, position, count).thenCompose(transferred -> {
 			synchronized (this) {
 				var populatedRange = Range.closedOpen(position, position + transferred);
 				populatedRanges.add(populatedRange);
-				activeRequests.remove(populatedRange);
 			}
 			return mergeDataInternal(missingRanges, source, position + transferred);
 		});
