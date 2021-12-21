@@ -44,6 +44,7 @@ class OpenFileFactory {
 	private final Path cacheDir;
 	private final ScheduledExecutorService scheduler;
 	private final int keepIdleFileSeconds;
+	private final int readAheadBytes;
 
 	@Inject
 	OpenFileFactory(@Named("openFiles") ConcurrentMap<CloudPath, OpenFile> openFiles, CloudProvider provider, CloudAccessFSConfig config, OpenFileUploader uploader, ScheduledExecutorService scheduler) {
@@ -52,6 +53,7 @@ class OpenFileFactory {
 		this.provider = provider;
 		this.uploader = uploader;
 		this.cacheDir = config.getCacheDir();
+		this.readAheadBytes = config.getReadAheadBytes();
 		this.scheduler = scheduler;
 		this.keepIdleFileSeconds = config.getIdleFileTimeoutSeconds();
 	}
@@ -86,7 +88,7 @@ class OpenFileFactory {
 	OpenFile createOpenFile(CloudPath path, long initialSize) {
 		try {
 			var tmpFile = cacheDir.resolve(UUID.randomUUID().toString());
-			return OpenFile.create(path, tmpFile, provider, initialSize);
+			return OpenFile.create(path, tmpFile, provider, initialSize, readAheadBytes);
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}

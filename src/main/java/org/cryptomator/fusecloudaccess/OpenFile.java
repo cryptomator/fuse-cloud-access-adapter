@@ -41,7 +41,6 @@ import static java.nio.file.StandardOpenOption.*;
 class OpenFile implements Closeable {
 
 	private static final Logger LOG = LoggerFactory.getLogger(OpenFile.class);
-	private static final int READAHEAD_SIZE = 1024 * 1024; // 1 MiB TODO: should this be configurable?
 
 	private final CompletableAsynchronousFileChannel fc;
 	private final CloudProvider provider;
@@ -49,13 +48,14 @@ class OpenFile implements Closeable {
 	private final RangeMap<Long, CompletionStage<Void>> activeRequests;
 	private final AtomicInteger openFileHandleCount;
 	private final AtomicReference<OpenFile.State> state;
+	private final int readAheadBytes;
 	private volatile CloudPath path;
 	private Instant lastModified;
 
 	public enum State {UNMODIFIED, NEEDS_UPLOAD, UPLOADING, NEEDS_REUPLOAD}
 
 	// visible for testing
-	OpenFile(CloudPath path, CompletableAsynchronousFileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, RangeMap<Long, CompletionStage<Void>> activeRequests, Instant initialLastModified) {
+	OpenFile(CloudPath path, CompletableAsynchronousFileChannel fc, CloudProvider provider, RangeSet<Long> populatedRanges, RangeMap<Long, CompletionStage<Void>> activeRequests, Instant initialLastModified, int readAheadBytes) {
 		this.path = path;
 		this.fc = fc;
 		this.provider = provider;
@@ -64,6 +64,7 @@ class OpenFile implements Closeable {
 		this.openFileHandleCount = new AtomicInteger();
 		this.state = new AtomicReference<>(State.UNMODIFIED);
 		this.lastModified = initialLastModified;
+		this.readAheadBytes = readAheadBytes;
 	}
 
 	/**
@@ -76,7 +77,7 @@ class OpenFile implements Closeable {
 	 * @return The created file
 	 * @throws IOException I/O errors during creation of the cache file located at <code>tmpFilePath</code>
 	 */
-	public static OpenFile create(CloudPath path, Path tmpFilePath, CloudProvider provider, long initialSize) throws IOException {
+	public static OpenFile create(CloudPath path, Path tmpFilePath, CloudProvider provider, long initialSize, int readAheadBytes) throws IOException {
 		var fc = AsynchronousFileChannel.open(tmpFilePath, READ, WRITE, CREATE_NEW, SPARSE, DELETE_ON_CLOSE);
 		if (initialSize > 0) {
 			try {
@@ -88,7 +89,7 @@ class OpenFile implements Closeable {
 				throw new IOException("Failed to create file", e);
 			}
 		}
-		return new OpenFile(path, new CompletableAsynchronousFileChannel(fc), provider, TreeRangeSet.create(), TreeRangeMap.create(), Instant.now());
+		return new OpenFile(path, new CompletableAsynchronousFileChannel(fc), provider, TreeRangeSet.create(), TreeRangeMap.create(), Instant.now(), readAheadBytes);
 	}
 
 	public AtomicInteger getOpenFileHandleCount() {
@@ -233,7 +234,7 @@ class OpenFile implements Closeable {
 				if (requiredRange.isEmpty() || populatedRanges.encloses(requiredRange)) {
 					return CompletableFuture.completedFuture(null);
 				} else {
-					var desiredCount = Math.max(count, READAHEAD_SIZE); // reads at least the readahead
+					var desiredCount = Math.max(count, readAheadBytes); // reads at least the readahead
 					var desiredLastByte = Math.min(size, offset + desiredCount); // reads not behind eof (lastByte is exclusive!)
 					var desiredRange = Range.closedOpen(offset, desiredLastByte);
 

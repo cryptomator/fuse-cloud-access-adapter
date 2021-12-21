@@ -43,6 +43,8 @@ public class OpenFileTest {
 	private RangeSet<Long> populatedRanges;
 	private RangeMap<Long, CompletionStage<Void>> activeRequests;
 
+	public static final int DEFAULT_READAHEAD_SIZE = 1024 * 1024 * 4; // 4 MiB
+
 	@BeforeEach
 	public void setup() throws IOException {
 		this.file = Mockito.mock(CloudPath.class, "/path/to/file");
@@ -50,7 +52,7 @@ public class OpenFileTest {
 		this.fileChannel = Mockito.mock(CompletableAsynchronousFileChannel.class);
 		this.populatedRanges = Mockito.spy(TreeRangeSet.create());
 		this.activeRequests = Mockito.spy(TreeRangeMap.create());
-		this.openFile = new OpenFile(file, fileChannel, provider, populatedRanges, activeRequests, Instant.EPOCH);
+		this.openFile = new OpenFile(file, fileChannel, provider, populatedRanges, activeRequests, Instant.EPOCH, DEFAULT_READAHEAD_SIZE);
 		Mockito.when(fileChannel.size()).thenReturn(100l);
 		Mockito.when(fileChannel.isOpen()).thenReturn(true);
 	}
@@ -60,7 +62,7 @@ public class OpenFileTest {
 	@ValueSource(longs = {0l, 1l, 42l})
 	public void testCreate(long size, @TempDir Path tmpDir) throws IOException {
 		Path tmpFile = tmpDir.resolve("cache.file");
-		try (var cachedFile = OpenFile.create(file, tmpFile, provider, size)) {
+		try (var cachedFile = OpenFile.create(file, tmpFile, provider, size, DEFAULT_READAHEAD_SIZE)) {
 			Assertions.assertNotNull(cachedFile);
 			Assertions.assertEquals(size, cachedFile.getSize());
 		}
@@ -73,7 +75,7 @@ public class OpenFileTest {
 		Path tmpFile = tmpDir.resolve("cache.file");
 		Path persistentFile = tmpDir.resolve("persistent.file");
 
-		try (var cachedFile = OpenFile.create(file, tmpFile, provider, 0)) {
+		try (var cachedFile = OpenFile.create(file, tmpFile, provider, 0, DEFAULT_READAHEAD_SIZE)) {
 			cachedFile.truncate(100l);
 			Assertions.assertTimeoutPreemptively(Duration.ofMillis(100), () -> cachedFile.persistTo(persistentFile).toCompletableFuture().get());
 		}
@@ -453,7 +455,7 @@ public class OpenFileTest {
 		public void setup() {
 			var prePopulatedRanges = ImmutableRangeSet.of(Range.closedOpen(0l, 50l));
 			populatedRanges = Mockito.spy(TreeRangeSet.create(prePopulatedRanges));
-			openFile = new OpenFile(file, fileChannel, provider, populatedRanges, activeRequests, Instant.EPOCH);
+			openFile = new OpenFile(file, fileChannel, provider, populatedRanges, activeRequests, Instant.EPOCH, DEFAULT_READAHEAD_SIZE);
 			this.fileSpy = Mockito.spy(openFile);
 		}
 
