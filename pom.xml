@@ -170,8 +170,8 @@
 				</executions>
 				<configuration>
 					<quiet>true</quiet>
-					<release>17</release>
-					<additionalOptions>-Xdoclint:all -Xdoclint:-missing</additionalOptions>
+					<source>8</source>
+					<doclint>none</doclint>
 				</configuration>
 			</plugin>
 			<plugin>
@@ -249,7 +249,7 @@
 				<plugins>
 					<plugin>
 						<artifactId>maven-gpg-plugin</artifactId>
-						<version>1.6</version>
+						<version>3.0.1</version>
 						<executions>
 							<execution>
 								<id>sign-artifacts</id>
