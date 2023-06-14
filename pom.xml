@@ -55,7 +55,7 @@
 		<cloudaccess.version>1.2.0-beta1</cloudaccess.version>
 		<slf4j.version>1.7.33</slf4j.version>
 		<dagger.version>2.40.5</dagger.version>
-		<guava.version>31.0.1-jre</guava.version>
+		<guava.version>32.0.0-jre</guava.version>
 
 		<!-- test dependencies -->
 		<junit.jupiter.version>5.8.2</junit.jupiter.version>
